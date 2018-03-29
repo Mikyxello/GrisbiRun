@@ -62,7 +62,7 @@ void* serverHandshake (int my_id, Image* mytexture,Image* map_elevation,Image* m
 		ERROR_HELPER(-1, "Cannot write to socket");
 	}
 	
-	char img_size[4];                  // int image size from server
+	char img_size[4];  // int image size from server
 	
 	while ( (msg_len = recv(socket_desc,img_size,4, 0)) < 0 ) {
         if (errno == EINTR) continue;
