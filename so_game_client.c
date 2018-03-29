@@ -16,6 +16,86 @@ WorldViewer viewer;
 World world;
 Vehicle* vehicle; // The vehicle
 
+void* serverHandshake (int my_id, Image* mytexture,Image* map_elevation,Image* map_texture,Image* my_texture_from_server){
+	
+	int ret;
+
+    // variables for handling a socket
+    int socket_desc;
+    struct sockaddr_in server_addr = {0}; // some fields are required to be filled with 0
+
+    // create a socket
+    socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+    ERROR_HELPER(socket_desc, "Could not create socket");
+
+    // set up parameters for the connection
+    server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDRESS);
+    server_addr.sin_family      = AF_INET;
+    server_addr.sin_port        = htons(SERVER_PORT); // don't forget about network byte order!
+
+    // initiate a connection on the socket
+    ret = connect(socket_desc, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in));
+    ERROR_HELPER(ret, "Could not create connection");
+
+    if (DEBUG) fprintf(stderr, "Connection established!\n");
+    
+    char id[4];  //buffer char per ID
+    size_t msg_len;
+
+    while ( (msg_len = recv(socket_desc, id, 4, 0)) < 0 ) { //ricevo ID dal server
+        if (errno == EINTR) continue;
+        ERROR_HELPER(-1, "Cannot read from socket");
+    }
+    
+    my_id = (int)id; //metto l'id dentro alla fantastica variabile "my_id"
+    
+    char* buffer[1024*1024*6]; // ?????????????????????????
+    
+    msg_len = strlen(msg);
+    
+    ret = Image_serialize(mytexture,buffer,1024*1024*6);
+    ERROR_HELPER(ret-1, "Cannot serialize mytexture");
+    
+	// send message to server
+	while ( (ret = send(socket_desc, buffer, 1024*1024*6, 0)) < 0) { //sistemare size buffer
+		if (errno == EINTR) continue;
+		ERROR_HELPER(-1, "Cannot write to socket");
+	}
+	
+	char img_size[4];                  // int image size from server
+	
+	while ( (msg_len = recv(socket_desc,img_size,4, 0)) < 0 ) {
+        if (errno == EINTR) continue;
+        ERROR_HELPER(-1, "Cannot read from socket");
+    }
+    
+    char imagebuf[(int)img_size];  //buffer char dell'immagine 
+    
+    while ( (msg_len = recv(socket_desc,imagebuf,(int)img_size, 0)) < 0 ) {
+        if (errno == EINTR) continue;
+        ERROR_HELPER(-1, "Cannot read from socket");
+    }
+    
+	map_elevation = Image_deserialize(imagebuf, (int)img_size);  //deserializzazione immagine
+	
+	while ( (msg_len = recv(socket_desc,img_size,4, 0)) < 0 ) {
+        if (errno == EINTR) continue;
+        ERROR_HELPER(-1, "Cannot read from socket");
+    }
+
+	char imagebuf2[(int)img_size];  //buffer char dell'immagine 
+    
+    while ( (msg_len = recv(socket_desc,imagebuf2,(int)img_size, 0)) < 0 ) {
+        if (errno == EINTR) continue;
+        ERROR_HELPER(-1, "Cannot read from socket");
+    }
+    
+	map_texture = Image_deserialize(imagebuf2, (int)img_size);  //deserializzazione immagine
+    
+    
+	
+}
+
 void keyPressed(unsigned char key, int x, int y)
 {
   switch(key){
@@ -114,6 +194,8 @@ int main(int argc, char **argv) {
   Image* map_elevation;
   Image* map_texture;
   Image* my_texture_from_server;
+  
+  connectionHandler(int my_id, mytexture, map_elevation, map_texture, my_texture_from_server);
 
   // construct the world
   World_init(&world, map_elevation, map_texture, 0.5, 0.5, 0.5);

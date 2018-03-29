@@ -18,6 +18,7 @@ OBJS = vec3.o\
        so_game_protocol.o\
 
 HEADERS=helpers.h\
+    common.h\
 	image.h\
 	linked_list.h\
 	so_game_protocol.h\
