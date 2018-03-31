@@ -67,6 +67,40 @@ void* serverHandshake (int my_id, Image* mytexture,Image* map_elevation,Image* m
     
     my_id = deserialized_packet->id; //scrivo l'id dentro la variabile
     
+    Packet_free(&deserialized_packet->header);
+	Packet_free(&idpack->header);
+	
+    ImagePacket* image_packet = (ImagePacket*)malloc(sizeof(ImagePacket));
+    PacketHeader im_head;
+    im_head.type = PostTexture;
+    image_packet->image = mytexture;
+    
+    char image_packet_buffer[1000000];
+    int image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header);
+    
+	while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio mytexture al server
+		if (errno == EINTR) continue;
+		ERROR_HELPER(-1, "Cannot write to socket");
+	}
+	
+	while ( (bytes_recv = recv(socket_desc, image_packet_buffer, sizeof(ImagePacket), 0)) < 0 ) { //ricevo ID dal server
+        if (errno == EINTR) continue;
+        ERROR_HELPER(-1, "Cannot read from socket");
+    }
+    
+    ImagePacket* deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv); 
+    my_texture_from_server = deserialized_image_packet->image;  //scrivo la texture che ho ricevuto dal server nella variabile
+    Packet_free(&deserialized_image_packet->header);
+	
+	
+
+	
+	
+
+
+
+	
+	
     
     
 	
@@ -244,7 +278,7 @@ int main(int argc, char **argv) {
   Image* map_texture;
   Image* my_texture_from_server;
   
-  connectionHandler(int my_id, mytexture, map_elevation, map_texture, my_texture_from_server);
+  connectionHandler(my_id, mytexture, map_elevation, map_texture, my_texture_from_server);
 
   // construct the world
   World_init(&world, map_elevation, map_texture, 0.5, 0.5, 0.5);
