@@ -18,7 +18,8 @@ Vehicle* vehicle; // The vehicle
 
 void* serverHandshake (int my_id, Image* mytexture,Image* map_elevation,Image* map_texture,Image* my_texture_from_server){
 	
-	int ret;
+	int ret, bytes_sent, bytes_recv;
+	PacketHeader packet_recv;
 
     // variables for handling a socket
     int socket_desc;
@@ -38,6 +39,54 @@ void* serverHandshake (int my_id, Image* mytexture,Image* map_elevation,Image* m
     ERROR_HELPER(ret, "Could not create connection");
 
     if (DEBUG) fprintf(stderr, "Connection established!\n");
+    
+    IdPacket* idpack = (IdPacket*)malloc(sizeof(IdPacket));
+    
+    PacketHeader id_head;
+    id_head.type = GetId;
+    
+    idpack->header = id_head;
+    idpack->id = -1;
+    
+    char id_packet_buffer[1000000];
+    
+    
+    bytes_sent = Packet_serialize(id_packet_buffer, &idpack->header);
+    
+	while ( (ret = send(socket_desc, id_packet_buffer, bytes_sent, 0)) < 0) {
+		if (errno == EINTR) continue;
+		ERROR_HELPER(-1, "Cannot write to socket");
+	}
+	
+	while ( (bytes_recv = recv(socket_desc, bufferPacket, sizeof(IdPacket), 0)) < 0 ) { //ricevo ID dal server
+        if (errno == EINTR) continue;
+        ERROR_HELPER(-1, "Cannot read from socket");
+    }
+    
+    IdPacket* deserialized_packet = (IdPacket*)Packet_deserialize(bufferPacket,bytes_recv);
+    
+    my_id = deserialized_packet->id; //scrivo l'id dentro la variabile
+    
+    
+    
+	
+	
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     char id[4];  //buffer char per ID
     size_t msg_len;
