@@ -31,56 +31,62 @@ void* connection_handler(void* arg) { //da implementare
     int socket_desc = args->socket_desc;
     struct sockaddr_in* client_addr = args->client_addr;
 
-    int ret, recv_bytes;
+	int ret, bytes_sent, bytes_recv;
+	char image_packet_buffer[1000000];
+	char id_packet_buffer[1000000];
+	
+	ImagePacket* image_packet = (ImagePacket*)malloc(sizeof(ImagePacket));
+	IdPacket* id_packet = (IdPacket*)malloc(sizeof(IdPacket));
 
-    char buf[1024];
-    size_t buf_len = sizeof(buf);
-    size_t msg_len;
-
-    char* quit_command = SERVER_COMMAND;
-    size_t quit_command_len = strlen(quit_command);
 
     // parse client IP address and port
     char client_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(client_addr->sin_addr), client_ip, INET_ADDRSTRLEN);
     uint16_t client_port = ntohs(client_addr->sin_port); // port number is an unsigned short
 
-    // send welcome message
-    sprintf(buf, "Hi! I'm an echo server. You are %s talking on port %hu.\nI will send you back whatever"
-            " you send me. I will stop if you send me %s :-)\n", client_ip, client_port, quit_command);
-    msg_len = strlen(buf);
-    while ( (ret = send(socket_desc, buf, msg_len, 0)) < 0 ) {
-        if (errno == EINTR) continue;
-        ERROR_HELPER(-1, "Cannot write to the socket");
-    }
-
-    // echo loop
-    while (1) {
-        // read message from client
-        while ( (recv_bytes = recv(socket_desc, buf, buf_len, 0)) < 0 ) {
-            if (errno == EINTR) continue;
-            ERROR_HELPER(-1, "Cannot read from socket");
-        }
-
-        // check whether I have just been told to quit...
-        if (recv_bytes == quit_command_len && !memcmp(buf, quit_command, quit_command_len)) break;
-
-        // ... or if I have to send the message back
-        while ( (ret = send(socket_desc, buf, recv_bytes, 0)) < 0 ) {
-            if (errno == EINTR) continue;
-            ERROR_HELPER(-1, "Cannot write to the socket");
-        }
-    }
-
-    // close socket
-    ret = close(socket_desc);
-    ERROR_HELPER(ret, "Cannot close socket for incoming connection");
-
-    if (DEBUG) fprintf(stderr, "Thread created to handle the request has completed.\n");
-
-    free(args->client_addr); // do not forget to free this buffer!
-    free(args);
-    pthread_exit(NULL);
+	// read message from client
+	while ( (recv_bytes = recv(socket_desc, id_packet_buffer, 1000000, 0)) < 0 ) {
+		if (errno == EINTR) continue;
+		ERROR_HELPER(-1, "Cannot read from socket");
+	}
+	
+	id_packet = (IdPacket*)Packet_deserialize(id_packet_buffer,bytes_recv);
+	
+	if(id_packet->id ==-1){
+		registerID(id_packet->id); // TODO: funzione che assegna ID al Client e se lo conserva nella linkedlist, eventualmente invia l'aggiornamento anche agli altri client connessi
+	} else (ERROR_HELPER(-1,"wrong packet received, waiting for a IDPacket to register");
+	
+	bytes_sent = Packet_serialize(id_packet_buffer, &id_packet->header);
+    
+	while ( (ret = send(socket_desc, id_packet_buffer, bytes_sent, 0)) < 0) { //invio al client l'id assegnato
+		if (errno == EINTR) continue;
+		ERROR_HELPER(-1, "Cannot write to socket");
+	}
+	
+	
+	while ( (recv_bytes = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo mytexture dal client
+		if (errno == EINTR) continue;
+		ERROR_HELPER(-1, "Cannot read from socket");
+	}
+	
+	image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer,recv_bytes); //deserializzo mytexture ricevuta
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+    //free(args->client_addr); // do not forget to free this buffer!
+    //free(args);
+    //pthread_exit(NULL);
 }
 
 
