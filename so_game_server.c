@@ -20,130 +20,112 @@ typedef struct handler_args_s {
 } handler_args_t;
 
 
-void* connection_handler(void* arg) { //da implementare
+// CONNECTION HANDLER FOR CLIENTS CONNECTED TO THE SERVER
+void* connection_handler(void* arg) {
 
-    handler_args_t* args = (handler_args_t*)arg;
+  handler_args_t* args = (handler_args_t*)arg;
 
-    /* We make local copies of the fields from the handler's arguments
-     * data structure only to share as much code as possible with the
-     * other two versions of the server. In general this is not a good
-     * coding practice: using simple indirection is better! */
-    int socket_desc = args->socket_desc;
-    struct sockaddr_in* client_addr = args->client_addr;
+  /* We make local copies of the fields from the handler's arguments
+   * data structure only to share as much code as possible with the
+   * other two versions of the server. In general this is not a good
+   * coding practice: using simple indirection is better! */
+  int socket_desc = args->socket_desc;
+  struct sockaddr_in* client_addr = args->client_addr;
 
-	int ret, bytes_sent, bytes_recv, connection_id;
-	char image_packet_buffer[1000000];
-	char id_packet_buffer[1000000];
-	
-	ImagePacket* image_packet = (ImagePacket*)malloc(sizeof(ImagePacket));
-	IdPacket* id_packet = (IdPacket*)malloc(sizeof(IdPacket));
+  int ret, bytes_sent, bytes_recv, connection_id;
+  char image_packet_buffer[1000000];
+  char id_packet_buffer[1000000];
+  
+  ImagePacket* image_packet = (ImagePacket*) malloc(sizeof(ImagePacket));
+  IdPacket* id_packet = (IdPacket*) malloc(sizeof(IdPacket));
 
+  // parse client IP address and port
+  char client_ip[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &(client_addr->sin_addr), client_ip, INET_ADDRSTRLEN);
+  uint16_t client_port = ntohs(client_addr->sin_port); // port number is an unsigned short
 
-    // parse client IP address and port
-    char client_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(client_addr->sin_addr), client_ip, INET_ADDRSTRLEN);
-    uint16_t client_port = ntohs(client_addr->sin_port); // port number is an unsigned short
-
-	// read message from client
-	while ( (recv_bytes = recv(socket_desc, id_packet_buffer, 1000000, 0)) < 0 ) {
-		if (errno == EINTR) continue;
-		ERROR_HELPER(-1, "Cannot read from socket");
-	}
-	
-	id_packet = (IdPacket*)Packet_deserialize(id_packet_buffer,bytes_recv);
-	
-	if(id_packet->id ==-1){
-		registerID(id_packet->id,&connection_id); // TODO: funzione che assegna ID al Client e se lo conserva nella linkedlist, eventualmente invia l'aggiornamento anche agli altri client connessi
-	} else (ERROR_HELPER(-1,"wrong packet received, waiting for a IDPacket to register");
-	
-	bytes_sent = Packet_serialize(id_packet_buffer, &id_packet->header);
+  // read message from client
+  while ( (recv_bytes = recv(socket_desc, id_packet_buffer, 1000000, 0)) < 0 ) {
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "Cannot read from socket");
+  }
+  
+  id_packet = (IdPacket*) Packet_deserialize(id_packet_buffer,bytes_recv);
+  
+  if(id_packet->id ==-1) {
+    registerID(id_packet->id,&connection_id);
+  }
+  else ERROR_HELPER(-1,"wrong packet received, waiting for a IDPacket to register");
+  
+  // TODO: funzione che assegna ID al Client e se lo conserva nella linkedlist, eventualmente invia l'aggiornamento anche agli altri client connessi
+  
+  bytes_sent = Packet_serialize(id_packet_buffer, &id_packet->header);
     
-	while ( (ret = send(socket_desc, id_packet_buffer, bytes_sent, 0)) < 0) { //invio al client l'id assegnato
-		if (errno == EINTR) continue;
-		ERROR_HELPER(-1, "Cannot write to socket");
-	}
-	
-	
-	while ( (recv_bytes = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo mytexture dal client
-		if (errno == EINTR) continue;
-		ERROR_HELPER(-1, "Cannot read from socket");
-	}
-	
-	image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer,recv_bytes); //deserializzo mytexture ricevuta
-	
-	// ^^^ TODO: che ce devo fà con la texture del giocatore? who knows >> qui invierò anche la texture all'id che me l'ha inviato
-	
-    ImagePacket* image_packet = (ImagePacket*)malloc(sizeof(ImagePacket));
+  while ( (ret = send(socket_desc, id_packet_buffer, bytes_sent, 0)) < 0) { //invio al client l'id assegnato
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "Cannot write to socket");
+  }
+  
+  while ( (recv_bytes = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo mytexture dal client
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "Cannot read from socket");
+  }
+  
+  image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer,recv_bytes); //deserializzo mytexture ricevuta
+  
+  // TODO: che ce devo fà con la texture del giocatore? who knows >> qui invierò anche la texture all'id che me l'ha inviato
+  
+  ImagePacket* image_packet = (ImagePacket*)malloc(sizeof(ImagePacket));
 
-    PacketHeader im_head;
-    im_head.type = PostTexture;
-    im_head.id = connection_id;  //faccio il pacchetto per la vehicle_texture
+  PacketHeader im_head;
+  im_head.type = PostTexture;
+  im_head.id = connection_id;  //faccio il pacchetto per la vehicle_texture
     
-    image_packet->header = im_head;
-    image_packet->image = args->vehicle_texture; //collego
+  image_packet->header = im_head;
+  image_packet->image = args->vehicle_texture; //collego
     
-	int image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header); //serializzo mytexture
-	
-  	while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio vehicle_texture al client
-		if (errno == EINTR) continue;
-		ERROR_HELPER(-1, "Cannot write to socket");
-	}
-	
-    im_head.type = PostElevation;
-    im_head.id = 0;			//faccio il pacchetto per la surface_elevation
+  int image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header); //serializzo mytexture
+  
+  while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio vehicle_texture al client
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "Cannot write to socket");
+  }
+  
+  im_head.type = PostElevation;
+  im_head.id = 0;      //faccio il pacchetto per la surface_elevation
     
-    image_packet->header = im_head;
-	image_packet->image = args->surface_elevation; //collego
+  image_packet->header = im_head;
+  image_packet->image = args->surface_elevation; //collego
 
-	image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header); //serializzo surface_elevation
-	
-  	while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio surface_elevation al client
-		if (errno == EINTR) continue;
-		ERROR_HELPER(-1, "Cannot write to socket");
-	}
-	
-    im_head.type = PostTexture;
-    im_head.id = 0;			//faccio il pacchetto per la surface_texture
+  image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header); //serializzo surface_elevation
+  
+  while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio surface_elevation al client
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "Cannot write to socket");
+  }
+  
+  im_head.type = PostTexture;
+  im_head.id = 0;      //faccio il pacchetto per la surface_texture
     
-    image_packet->header = im_head;
-	image_packet->image = args->surface_texture; //collego
+  image_packet->header = im_head;
+  image_packet->image = args->surface_texture; //collego
 
-	image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header); //serializzo surface_texture
-	
-  	while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio surface_texture al client
-		if (errno == EINTR) continue;
-		ERROR_HELPER(-1, "Cannot write to socket");
-	}
-	
-    Packet_free(&image_packet->header); //libero pacchetto
+  image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header); //serializzo surface_texture
+  
+  while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio surface_texture al client
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "Cannot write to socket");
+  }
+  
+  Packet_free(&image_packet->header); //libero pacchetto
 
-
-	
-	
-	
-	
-	
-	
-	
-	//TODO : creare handler udp ?
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-    free(args->client_addr); // do not forget to free this buffer!
-    free(args);
-    pthread_exit(NULL);
+  /*
+  * TODO: CREATE HANDLER UDP 
+  */
+  
+  free(args->client_addr); // do not forget to free this buffer!
+  free(args);
+  pthread_exit(NULL);
 }
 
 

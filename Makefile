@@ -6,7 +6,9 @@ AR=ar
 
 BINS=libso_game.a\
      so_game\
-     test_packets_serialization 
+     test_packets_serialization\
+     so_game_client\
+     so_game_server\
 
 OBJS = vec3.o\
        linked_list.o\
@@ -18,7 +20,7 @@ OBJS = vec3.o\
        so_game_protocol.o\
 
 HEADERS=helpers.h\
-    common.h\
+    	common.h\
 	image.h\
 	linked_list.h\
 	so_game_protocol.h\
@@ -45,6 +47,12 @@ so_game: so_game.c libso_game.a
 
 test_packets_serialization: test_packets_serialization.c libso_game.a  
 	$(CC) $(CCOPTS) -Ofast -o $@ $^  $(LIBS)
+
+so_game_client: so_game_client.c libso_game.a 
+	$(CC) $(CCOPTS) -Ofast -o $@ $^ $(LIBS)
+
+so_game_server: so_game_server.c libso_game.a 
+	$(CC) $(CCOPTS) -Ofast -o $@ $^ $(LIBS)
 
 clean:
 	rm -rf *.o *~  $(BINS)
