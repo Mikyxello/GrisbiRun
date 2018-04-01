@@ -83,35 +83,32 @@ void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image
 	}
 	
 	Packet_free(&image_packet->header);
+	
+	ImagePacket* deserialized_image_packet = (ImagePacket*)malloc(sizeof(ImagePacket));
+	for (int k=0;k<3,k++){ //ciclo 3 volte per prendere my_texture / map_elevation / map_texture
 
+		
+		while ( (bytes_recv = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo pacchetto dal server
+			if (errno == EINTR) continue;
+			ERROR_HELPER(-1, "Cannot read from socket");
+		}
+		
+		deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv);
+		
+		if (deserialized_image_packet->header->type == PostElevation){
+			*map_elevation = deserialized_image_packet->image;
+		}
+		else if (deserialized_image_packet->header->type == PostTexture){
+			if (deserialized_image_packet->id == 0){
+				*map_texture = deserialized_image_packet->image;  //scrivo la  map_texture che ho ricevuto dal server nella variabile
+			}
+			else {
+				*my_texture_from_server = deserialized_image_packet->image;  //scrivo la texture che ho ricevuto dal server nella variabile
+			}
+		}
+	}
 	
-	while ( (bytes_recv = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo my_texture dal server
-        if (errno == EINTR) continue;
-        ERROR_HELPER(-1, "Cannot read from socket");
-    }
-    
-    ImagePacket* deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv); 
-    *my_texture_from_server = deserialized_image_packet->image;  //scrivo la texture che ho ricevuto dal server nella variabile
-    
-    
-	while ( (bytes_recv = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo ID dal server
-        if (errno == EINTR) continue;
-        ERROR_HELPER(-1, "Cannot read from socket");
-    }
-    
-    deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv         
-    *map_elevation = deserialized_image_packet->image;  //scrivo la map_elevation che ho ricevuto dal server nella variabile
-    
-	while ( (bytes_recv = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo ID dal server
-        if (errno == EINTR) continue;
-        ERROR_HELPER(-1, "Cannot read from socket");
-    }
-    
-    deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv); 
-    *map_texture = deserialized_image_packet->image;  //scrivo la  map_texture che ho ricevuto dal server nella variabile
-        
 	Packet_free(&deserialized_image_packet->header);
-	
 	return;
 }
 
