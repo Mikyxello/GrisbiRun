@@ -74,7 +74,8 @@ void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image
     PacketHeader im_head;
     im_head.type = PostTexture;
     image_packet->image = *mytexture;
-   
+    image_packet->header = im_head;
+
     int image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header);
 	while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio mytexture al server
 		if (errno == EINTR) continue;
@@ -84,7 +85,7 @@ void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image
 	Packet_free(&image_packet->header);
 
 	
-	while ( (bytes_recv = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo ID dal server
+	while ( (bytes_recv = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo my_texture dal server
         if (errno == EINTR) continue;
         ERROR_HELPER(-1, "Cannot read from socket");
     }
@@ -98,7 +99,7 @@ void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image
         ERROR_HELPER(-1, "Cannot read from socket");
     }
     
-    ImagePacket* deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv); 
+    deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv         
     *map_elevation = deserialized_image_packet->image;  //scrivo la map_elevation che ho ricevuto dal server nella variabile
     
 	while ( (bytes_recv = recv(socket_desc, image_packet_buffer, 1000000, 0)) < 0 ) { //ricevo ID dal server
@@ -106,7 +107,7 @@ void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image
         ERROR_HELPER(-1, "Cannot read from socket");
     }
     
-    ImagePacket* deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv); 
+    deserialized_image_packet = (ImagePacket*)Packet_deserialize(image_packet_buffer, bytes_recv); 
     *map_texture = deserialized_image_packet->image;  //scrivo la  map_texture che ho ricevuto dal server nella variabile
         
 	Packet_free(&deserialized_image_packet->header);
