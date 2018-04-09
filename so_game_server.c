@@ -172,6 +172,13 @@ int main(int argc, char **argv) {
   } else {
     printf("Fail! \n");
   }
+  
+  //init update thread
+  UserHead* uh = (UserHead*)malloc(sizeof(UserHead));
+  List_init(uh);
+  
+  pthread_t update_thread;
+  
 
 
 //INIZIALIZZAZIONE SERVER MULTITHREAD
