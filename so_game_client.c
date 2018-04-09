@@ -4,17 +4,68 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
-
+#include <arpa/inet.h>  // htons() and inet_addr()
+#include <netinet/in.h> // struct sockaddr_in
+#include <sys/socket.h>
+#include <pthread.h>
+#include <signal.h>
+#include <time.h>
+#include <fcntl.h>
+#include "common.h"
 #include "image.h"
 #include "surface.h"
 #include "world.h"
 #include "vehicle.h"
 #include "world_viewer.h"
 
+int my_id;
 int window;
 WorldViewer viewer;
 World world;
 Vehicle* vehicle; // The vehicle
+int socket_desc; //socket tcp
+struct timeval last_update_time;
+
+typedef struct udpArgs{
+    localWorld* lw;
+    struct sockaddr_in server_addr;
+    int socket_udp;
+    int socket_tcp;
+}udpArgs;
+
+void* UDP_Sender(void* args){
+	
+    udpArgs udp_args =*(udpArgs*)args;
+    struct sockaddr_in server_addr=udp_args.server_addr;
+    int socket_udp =udp_args.socket_udp;
+    int serverlen=sizeof(server_addr);
+    
+    while (1){
+		ret = send_updates(socket_udp,server_addr,serverlen);
+		PTHREAD_ERROR_HELPER(ret,"error during send_updates");
+		usleep(TIME_TO_SLEEP);
+	}
+    close(s);
+    return 0;
+
+}
+
+int sendUpdates(int socket_udp,struct sockaddr_in server_addr,int serverlen){
+	    //----- paccehtto update vehicle udp------              QUANDO VA' INVIATO?? who knows
+    VehicleUpdatePacket* vehicle_packet = (VehicleUpdatePacket*)malloc(sizeof(VehicleUpdatePacket));
+    PacketHeader v_head;
+	v_head.type = VehicleUpdate;
+    vehicle_packet->header = v_head;
+    vehicle_packet->id = my_id;
+    vehicle_packet->rotational_force = vehicle->rotational_force;
+    vehicle_packet->translational_force = vehicle->translational_force;
+    char vehicle_buffer[1000000];
+    int vehicle_buffer_size = Packet_serialize(vehicle_buffer, &vehicle_packet->header);
+    ret = sendto(s, vehicle_buffer, vehicle_buffer_size , 0 , (struct sockaddr *) &si_other, slen);
+    PTHREAD_ERROR_HELPER(ret,"UDP sendto failed"); 
+    //----- paccehtto update vehicle udp------    
+}
+
 
 void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image** map_texture,Image** my_texture_from_server){
 	
@@ -25,7 +76,6 @@ void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image
 	PacketHeader packet_recv;
 
     // variables for handling a socket
-    int socket_desc;
     struct sockaddr_in server_addr = {0}; // some fields are required to be filled with 0
 
     // create a socket
@@ -58,6 +108,8 @@ void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image
 		ERROR_HELPER(-1, "Cannot write to socket");
 	}
 	
+	//azzeramento buffer id_packet_buffer
+	
 	while ( (bytes_recv = recv(socket_desc, id_packet_buffer, 1000000, 0)) < 0 ) { //ricevo ID dal server
         if (errno == EINTR) continue;
         ERROR_HELPER(-1, "Cannot read from socket");
@@ -85,6 +137,7 @@ void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image
 	Packet_free(&image_packet->header);
 	
 	ImagePacket* deserialized_image_packet = (ImagePacket*)malloc(sizeof(ImagePacket));
+	
 	for (int k=0;k<3,k++){ //ciclo 3 volte per prendere my_texture / map_elevation / map_texture
 
 		
@@ -206,7 +259,7 @@ int main(int argc, char **argv) {
   //   -get the texture of the surface
 
   // these come from the server
-  int my_id;
+  // my_id dichiarata globale
   Image* map_elevation;
   Image* map_texture;
   Image* my_texture_from_server;
@@ -226,6 +279,35 @@ int main(int argc, char **argv) {
   // when the server notifies a new player has joined the game
   // request the texture and add the player to the pool
   /*FILLME*/
+  
+    //UDP Init
+    uint16_t port_number_udp = htons((uint16_t)UDPPORT); // we use network byte order
+	int socket_udp = socket(AF_INET, SOCK_DGRAM, 0);
+    ERROR_HELPER(socket_desc, "Can't create an UDP socket");
+	struct sockaddr_in udp_server = {0}; // some fields are required to be filled with 0
+    udp_server.sin_addr.s_addr = ip_addr;
+    udp_server.sin_family      = AF_INET;
+    udp_server.sin_port        = port_number_udp;
+    debug_print("[Main] Socket UDP created and ready to work \n");
+
+    //Create UDP Threads
+    pthread_t UDP_sender,UDP_receiver;
+    udpArgs udp_args;
+    udp_args.socket_tcp=socket_desc;
+    udp_args.server_addr=udp_server;
+    udp_args.socket_udp=socket_udp;
+    
+    ret = pthread_create(&UDP_sender, NULL, UDP_Sender, udp_args);
+    ERROR_HELPER(ret,"can't create UDP_Sender thread");
+    
+    ret = pthread_create(&UDP_receiver, NULL, UDP_Receiver, udp_args);
+    ERROR_HELPER(ret,"can't create UDP_Receiver thread");
+  
+  pthread_t update_thread;
+  if (pthread_create(&update_thread, NULL, updating_thread, NULL) != 0) {
+	fprintf(stderr, "Can't create a new thread, error %d\n", errno);
+	exit(EXIT_FAILURE);
+	}
 
   WorldViewer_runGlobal(&world, vehicle, &argc, argv);
 

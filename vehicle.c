@@ -80,6 +80,28 @@ void Vehicle_init(Vehicle* v, World* w, int id, Image* texture){
   v->_destructor=0;
 }
 
+void Vehicle_getXYTheta(Vehicle* v,float* x, float* y, float* theta){
+    *x=v->x;
+    *y=v->y;
+    *theta=v->theta;
+    }
+
+void Vehicle_setXYTheta(Vehicle* v, float x, float y, float theta){
+    v->x=x;
+    v->y=y;
+    v->theta=theta;
+}
+
+void Vehicle_getForcesUpdate(Vehicle* v, float* translational_update, float* rotational_update){
+    *translational_update=v->translational_force_update;
+    *rotational_update=v->rotational_force_update;
+}
+
+void Vehicle_setForcesUpdate(Vehicle* v, float translational_update, float rotational_update){
+    v->translational_force_update=translational_update;
+    v->rotational_force_update=rotational_update;
+}
+
 
 void Vehicle_reset(Vehicle* v){
   v->rotational_force=0;

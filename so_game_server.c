@@ -4,7 +4,14 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
-
+#include <arpa/inet.h>  // htons() and inet_addr()
+#include <netinet/in.h> // struct sockaddr_in
+#include <sys/socket.h>
+#include <pthread.h>
+#include <signal.h>
+#include <time.h>
+#include <fcntl.h>
+#include "common.h"
 #include "image.h"
 #include "surface.h"
 #include "world.h"
