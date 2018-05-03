@@ -33,8 +33,7 @@ typedef struct {
 /* Definizione Socket e variabili 'globali' */
 int tcp_socket, udp_socket, World world;
 
-//UserList* users;  // Lista degli utenti connessi
-
+UserHead* users; 	// Inizio lista utenti per ricerca
 
 /* Gestione pacchetti TCP ricevuti */
 int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture) {
@@ -225,37 +224,34 @@ void* TCP_handler(void* args){
   tcp_args_t* tcp_args = (tcp_args_t*) args;	// Cast degli args da void a tcp_args_t
 
   /* Creazione nuovo utente e inserimento in lista */
-  /*
-  User user = malloc(sizeof(User));
-  user->id = tcp_args->client_desc;
-  user->x     = 0;
-  user->y     = 0;
-  user->theta = 0;
-
-  UserList_insert(users, user);
-  */
+  User aux = malloc(sizeof(User));
+  aux->id = tcp_args->client_desc;
+  aux->x     = 0;
+  aux->y     = 0;
+  aux->theta = 0;
+  User_insert(users, aux);
 
   int sockaddr_len = sizeof(struct sockaddr_in);
   struct sockaddr_in client_addr = {0};
   int tcp_client_desc = accept(tcp_socket, (struct sockaddr*)&client_addr, (socklen_t*) &sockaddr_len);   // Accetta nuova connessione dal client
-	ERROR_HELPER(tcp_client_desc, "[Error] Failed to accept client TCP connection");
+  ERROR_HELPER(tcp_client_desc, "[Error] Failed to accept client TCP connection");
 
-	pthread_t client_thread;
+  pthread_t client_thread;
 
-	/* args del thread client */
-	tcp_args_t tcp_args_aux;
-	tcp_args_aux.client_desc = tcp_client_desc;
-	tcp_args_aux.elevation_texture = tcp_args->elevation_texture;
-	tcp_args_aux.surface_elevation = tcp_args->surface_elevation;
+  /* args del thread client */
+  tcp_args_t tcp_args_aux;
+  tcp_args_aux.client_desc = tcp_client_desc;
+  tcp_args_aux.elevation_texture = tcp_args->elevation_texture;
+  tcp_args_aux.surface_elevation = tcp_args->surface_elevation;
 
-	/* Thread create - TODO: TCP_client_handler da implementare */
-	ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
-	PTHREAD_ERROR_HELPER(ret, "[Client] Failed to create TCP client thread");
+  /* Thread create */
+  ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
+  PTHREAD_ERROR_HELPER(ret, "[Client] Failed to create TCP client thread");
 
-	/* Thread detach (NON JOIN) */
-	ret = pthread_detach(client_thread);
+  /* Thread detach */
+  ret = pthread_detach(client_thread);
 
-	/* Chiusura thread */
+  /* Chiusura thread */
   pthread_exit(0);
 }
 
@@ -263,7 +259,7 @@ void* TCP_handler(void* args){
 
 /* Handler della connessione UDP con il client in modalità 'receiver' (riceve pacchetti) */
 void* UDP_receiver_handler(void* args) {
-
+	// TODO
 }
 
 
@@ -281,44 +277,39 @@ void* UDP_sender_handler(void* args) {
 
   int num_vehicles_update = 0;  /* TODO: Implementare lista client da contare */
  
-  /*
-  User user = users->first;
-  while(user != NULL) {
+  /* Conta il numero di utenti collegati */
+  User aux = users->first;
+  while(aux != NULL) {
     num_vehicles_update++;
-    user = user->next;
+    aux = aux->next;
   }
-
-  user = users->first;
-  */
+  aux = users->first;
 
   world_update->updates = (ClientUpdate*)malloc(sizeof(ClientUpdate) * n);
 
   for (int i=0; i<num_vehicles_update; i++) {
     ClientUpdate i_client = &(world_update->updates[i]);
 
-    /*
-    client_update->id = user->id;
-    client_update->x = Vehicle_getX(user[i]);
-    client_update->y = Vehicle_getY(user[i]);
-    client_update->theta = Vehicle_getTheta(user[i]);
-    client_update->translational_force = Vehicle_getTranslationalForce(user[i]);
-    client_update->rotational_force = Vehicle_getRotationalForce(user[i]);
+    client_update->id = aux->id;
+    client_update->x = Vehicle_getX(aux);
+    client_update->y = Vehicle_getY(aux);
+    client_update->theta = Vehicle_getTheta(aux);
+    client_update->translational_force = Vehicle_getTranslationalForce(aux);
+    client_update->rotational_force = Vehicle_getRotationalForce(aux);
 
-    user = user->next;
-    */
+    aux = aux->next;
   }
   int size = Packet_serialize(buffer_send, &world_update->header)
 
-  //user = users->first;
+  aux = users->first;
 
   /* Invia i pacchetti a tutti gli utenti connessi */
-  /*
-  while (user != NULL) {
-    ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*)&user->user_addr, (socklen_t)sizeof(user->user_addr));
-    user = user->nex;
+  while (aux != NULL) {
+    ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*)&aux->user_addr, (socklen_t)sizeof(aux->user_addr));
+    aux = aux->nex;
   }
-  */
 
+  /* Liberazione memoria */
   Packet_free(world_update->header);
   Packet_free(world_update);
   pthread_exit(0);
@@ -406,11 +397,9 @@ int main(int argc, char **argv) {
   /* Server UDP inizializzato */
 
   /* Inizializzazione utenti */
-  /*
-  users = (UserList*) malloc(sizeof(UserList));
+  users = (UserHead*) malloc(sizeof(UserHead));
   UserList_init(users);
   fprintf(stdout, "Lista degli utenti inizializzata");
-  */
 
   /* Inizializzazione del mondo */
   World_init(&world, surface_elevation, surface_texture,  0.5, 0.5, 0.5);

@@ -1,91 +1,90 @@
-#include "user_list.h"
+#include "user_User.h"
 #include <assert.h>
 
-
-void List_init(UserHead* head) {
+void User_init(UserHead* head) {
   head->first=0;
   head->last=0;
   head->size=0;
 }
 
-UserList* List_find_for_id(UserHead* head,int id) {
-  // linear scanning of list
-  UserList* aux=head->first;
+User* User_find_id(UserHead* head, int id) {
+  // linear scanning of User
+  User* aux=head->first;
   while(aux){
-    if (aux->id==id)
+    if (aux->id == id)
       return aux;
     aux=aux->next;
   }
   return 0;
 }
 
-UserList* List_find(UserHead* head, UserList* item) {
-  // linear scanning of list
-  UserList* aux=head->first;
+User* User_find(UserHead* head, User* user) {
+  // linear scanning of User
+  User* aux=head->first;
   while(aux){
-    if (aux==item)
-      return item;
+    if (aux==user)
+      return user;
     aux=aux->next;
   }
   return 0;
 }
 
-UserList* List_insert(UserHead* head, UserList* prev, UserList* item) {
-  if (item->next || item->prev)
+User* User_insert(UserHead* head, User* prev, User* user) {
+  if (user->next || user->prev)
     return 0;
   
-#ifdef _LIST_DEBUG_
-  // we check that the element is not in the list
-  UserList* instance=List_find(head, item);
+#ifdef _User_DEBUG_
+  // we check that the element is not in the User
+  User* instance=User_find(head, user);
   assert(!instance);
 
-  // we check that the previous is inthe list
+  // we check that the previous is inthe User
 
   if (prev) {
-    UserList* prev_instance=List_find(head, prev);
+    User* prev_instance=User_find(head, prev);
     assert(prev_instance);
   }
-  // we check that the previous is inthe list
+  // we check that the previous is inthe User
 #endif
 
-  UserList* next= prev ? prev->next : head->first;
+  User* next= prev ? prev->next : head->first;
   if (prev) {
-    item->prev=prev;
-    prev->next=item;
+    user->prev=prev;
+    prev->next=user;
   }
   if (next) {
-    item->next=next;
-    next->prev=item;
+    user->next=next;
+    next->prev=user;
   }
   if (!prev)
-    head->first=item;
+    head->first=user;
   if(!next)
-    head->last=item;
+    head->last=user;
   ++head->size;
-  return item;
+  return user;
 }
 
-UserList* List_detach(UserHead* head, UserList* item) {
+User* User_detach(UserHead* head, User* user) {
 
-#ifdef _LIST_DEBUG_
-  // we check that the element is in the list
-  UserList* instance=List_find(head, item);
+#ifdef _User_DEBUG_
+  // we check that the element is in the User
+  User* instance=User_find(head, user);
   assert(instance);
 #endif
 
-  UserList* prev=item->prev;
-  UserList* next=item->next;
+  User* prev=user->prev;
+  User* next=user->next;
   if (prev){
     prev->next=next;
   }
   if(next){
     next->prev=prev;
   }
-  if (item==head->first)
+  if (user==head->first)
     head->first=next;
-  if (item==head->last)
+  if (user==head->last)
     head->last=prev;
   head->size--;
-  item->next=item->prev=0;
-  return item;
+  user->next=user->prev=0;
+  return user;
 }
