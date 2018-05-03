@@ -275,30 +275,29 @@ void* UDP_sender_handler(void* args) {
   WorldUpdatePacket* world_update = (WorldUpdatePacket*) malloc(sizeof(WorldUpdatePacket));
   world_update->header = header;
 
-  int num_vehicles_update = 0;  /* TODO: Implementare lista client da contare */
+  int n_users = 0;
  
   /* Conta il numero di utenti collegati */
   User aux = users->first;
   while(aux != NULL) {
-    num_vehicles_update++;
+    n_users++;
     aux = aux->next;
   }
   aux = users->first;
 
   world_update->updates = (ClientUpdate*)malloc(sizeof(ClientUpdate) * n);
 
-  for (int i=0; i<num_vehicles_update; i++) {
+  for (int i=0; i<n_users; i++) {
     ClientUpdate i_client = &(world_update->updates[i]);
 
-    client_update->id = aux->id;
-    client_update->x = Vehicle_getX(aux);
-    client_update->y = Vehicle_getY(aux);
-    client_update->theta = Vehicle_getTheta(aux);
-    client_update->translational_force = Vehicle_getTranslationalForce(aux);
-    client_update->rotational_force = Vehicle_getRotationalForce(aux);
+    i_client->id = aux->id;
+    Vehicle_getXYTheta(aux->vehicle, i_client->x, i_client->y, i_client->theta);
+    // Vehicle_getForcesUpdate(aux->vehicle, i_client->translational_force, i_client->rotational_force);
 
     aux = aux->next;
   }
+
+  /* Serializzazione del pacchetto per update nel buffer */
   int size = Packet_serialize(buffer_send, &world_update->header)
 
   aux = users->first;
@@ -398,7 +397,7 @@ int main(int argc, char **argv) {
 
   /* Inizializzazione utenti */
   users = (UserHead*) malloc(sizeof(UserHead));
-  UserList_init(users);
+  User_init(users);
   fprintf(stdout, "Lista degli utenti inizializzata");
 
   /* Inizializzazione del mondo */
@@ -408,7 +407,7 @@ int main(int argc, char **argv) {
   /* ------------------- */
   /* Gestione dei thread */
   /* ------------------- */
-  pthread_t TCP_connection, UDP_sender_thread, UDP_receiver_thread, world_thread;
+  pthread_t TCP_connection, UDP_sender_thread, UDP_receiver_thread;
 
   /* Args per il thread TCP */
   tcp_args_t tcp_args;
@@ -425,9 +424,6 @@ int main(int argc, char **argv) {
   ret = pthread_create(&UDP_receiver_thread, NULL, UDP_receiver_handler, NULL);  // TODO: Definire la funzione UDP_receiver_handler
   PTHREAD_ERROR_HELPER(ret, "Failed to create UDP receiver thread");
 
-  ret = pthread_create(&world_thread, NULL, world_handler, NULL); // TODO: Definire la funzione world_handler
-  PTHREAD_ERROR_HELPER(ret, "Failed to create World server thread");
-  
   /* Join dei thread */
   ret=pthread_join(TCP_connection,NULL);
   ERROR_HELPER(ret,"Failed to join TCP server connection thread");
@@ -437,9 +433,6 @@ int main(int argc, char **argv) {
 
   ret=pthread_join(UDP_receiver_thread,NULL);
   ERROR_HELPER(ret,"Failed to join UDP server receiver thread");
-
-  ret=pthread_join(world_thread,NULL);
-  ERROR_HELPER(ret,"Failed to join World server thread");
 
   /* Cleanup generale per liberare la memoria utilizzata */
   Image_free(surface_texture);

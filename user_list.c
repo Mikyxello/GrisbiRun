@@ -2,8 +2,8 @@
 #include <assert.h>
 
 void User_init(UserHead* head) {
-  head->first=0;
-  head->last=0;
+  head->first=NULL;
+  head->last=NULL;
   head->size=0;
 }
 

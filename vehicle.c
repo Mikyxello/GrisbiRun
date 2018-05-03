@@ -84,7 +84,7 @@ void Vehicle_getXYTheta(Vehicle* v,float* x, float* y, float* theta){
     *x=v->x;
     *y=v->y;
     *theta=v->theta;
-    }
+}
 
 void Vehicle_setXYTheta(Vehicle* v, float x, float y, float theta){
     v->x=x;
