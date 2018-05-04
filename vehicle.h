@@ -43,3 +43,11 @@ void Vehicle_reset(Vehicle* v);
 int Vehicle_update(Vehicle* v, float dt);
 
 void Vehicle_destroy(Vehicle* v);
+
+void Vehicle_getXYTheta(Vehicle* v,float* x, float* y, float* theta);
+
+void Vehicle_setXYTheta(Vehicle* v, float x, float y, float theta);
+
+void Vehicle_getForcesUpdate(Vehicle* v, float* translational_update, float* rotational_update);
+
+void Vehicle_setForcesUpdate(Vehicle* v, float translational_update, float rotational_update);

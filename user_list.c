@@ -1,7 +1,9 @@
-#include "user_User.h"
+#include "user_list.h"
 #include <assert.h>
+#include <stdlib.h>
+#include <stdio.h>
 
-void User_init(UserHead* head) {
+void Users_init(UserHead* head) {
   head->first=NULL;
   head->last=NULL;
   head->size=0;
@@ -61,6 +63,15 @@ User* User_insert(UserHead* head, User* prev, User* user) {
   if(!next)
     head->last=user;
   ++head->size;
+  return user;
+}
+
+User* User_insert_last(UserHead* head, User* user) {
+  User* aux = head->first;
+  if(aux->next != NULL)
+    aux = aux->next;
+
+  aux->next = user;
   return user;
 }
 

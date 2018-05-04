@@ -4,8 +4,8 @@
 //ia brief desription required
 typedef enum {
   GetId=0x1,
-  GetTexture=0x2,     //which packet uses this??
-  GetElevation=0x3,   //which packet uses this??
+  GetTexture=0x2,
+  GetElevation=0x3,
   PostTexture=0x4,
   PostElevation=0x5,
   WorldUpdate=0x6,

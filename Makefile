@@ -5,32 +5,33 @@ AR=ar
 
 
 BINS=libso_game.a\
-     so_game_client\
+	 so_game_client\
      so_game_server\
      test_packets_serialization
 
-OBJS = vec3.o\
+OBJS = image.o\
        linked_list.o\
+       so_game_protocol.o\
+       so_game_client.o\
+       so_game_server.o\
        surface.o\
-       image.o\
+       user_list.o\
+       vec3.o\
        vehicle.o\
        world.o\
        world_viewer.o\
-       so_game_protocol.o\
-       so_game_server.o\
-       so_game_client.o\
 
-HEADERS=helpers.h\
-    	common.h\
+HEADERS=common.h\
+		helpers.h\
 		image.h\
 		linked_list.h\
 		so_game_protocol.h\
 		surface.h\
+		user_list.h\
 		vec3.h\
 		vehicle.h\
 		world.h\
 		world_viewer.h\
-		user_list.h\
 
 %.o:	%.c $(HEADERS)
 	$(CC) $(CCOPTS) -c -o $@  $<
