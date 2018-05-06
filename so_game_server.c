@@ -186,9 +186,12 @@ void* TCP_client_handler (void* args){
   char buffer_recv[BUFFER_SIZE];	// Conterrà il PacketHeader
 
   /* Inserimento utente in lista */
-  User* user = malloc(sizeof(User));
+  User* user = (User*) malloc(sizeof(User));
   user->id = tcp_client_desc;
   user->user_addr_tcp = tcp_args->client_addr;
+  user->x = 0;
+  user->y = 0;
+  user->theta = 0;
   user->vehicle = NULL;
   User_insert_last(users, user);
 
@@ -230,14 +233,6 @@ void* TCP_client_handler (void* args){
 void* TCP_handler(void* args){
   int ret;
   tcp_args_t* tcp_args = (tcp_args_t*) args;	// Cast degli args da void a tcp_args_t
-
-  /* Creazione nuovo utente e inserimento in lista */
-  User* user = (User*) malloc(sizeof(User));
-  user->id = tcp_args->client_desc;
-  user->x = 0;
-  user->y = 0;
-  user->theta = 0;
-  User_insert_last(users, user);
 
   int sockaddr_len = sizeof(struct sockaddr_in);
   struct sockaddr_in client_addr = {0};
