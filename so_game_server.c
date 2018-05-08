@@ -178,12 +178,16 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
 
 /* Gestione del thread del client per aggiunta del client alla lista e controllo pacchetti tramite TCP_packet (DA COMPLETARE) */
 void* TCP_client_handler (void* args){
+  printf("[TCP] Handling client...\n");
+
   tcp_args_t* tcp_args = (tcp_args_t*) args;
 
   int tcp_client_desc = tcp_args->client_desc;
   int msg_length = 0;
   int ret;
   char buffer_recv[BUFFER_SIZE];	// Conterrà il PacketHeader
+
+  printf("[TCP] Creating user...\n");
 
   /* Inserimento utente in lista */
   User* user = (User*) malloc(sizeof(User));
@@ -195,6 +199,7 @@ void* TCP_client_handler (void* args){
   user->vehicle = NULL;
   User_insert_last(users, user);
 
+  printf("[TCP] User %d inserted...", user->id);
 
   /* Ricezione del pacchetto */
   int packet_length = sizeof(PacketHeader);
@@ -217,6 +222,8 @@ void* TCP_client_handler (void* args){
     msg_length += ret;
   }
 
+  printf("[TCP] Packet received...");
+
   /* Gestione del pacchetto ricevuto tramite l'handler dei pacchetti */
   ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture);
 
@@ -231,13 +238,24 @@ void* TCP_client_handler (void* args){
 
 /* Handler della connessione TCP con il client (nel thread) */
 void* TCP_handler(void* args){
+
+  printf("[TCP] Handler started...\n");
+
   int ret;
+
+  printf("[TCP] Casting tcp args...\n");
+
   tcp_args_t* tcp_args = (tcp_args_t*) args;	// Cast degli args da void a tcp_args_t
 
+  printf("[TCP] Args casted...\n");
+  printf("[TCP] Accepting connection from clients...\n");
+
   int sockaddr_len = sizeof(struct sockaddr_in);
-  struct sockaddr_in client_addr = {0};
+  struct sockaddr_in client_addr;
   int tcp_client_desc = accept(tcp_socket, (struct sockaddr*)&client_addr, (socklen_t*) &sockaddr_len);   // Accetta nuova connessione dal client
   ERROR_HELPER(tcp_client_desc, "[ERROR] Failed to accept client TCP connection!!!");
+
+  if (tcp_client_desc>=0) printf("[TCP] Connection enstablished with %d...\n", tcp_client_desc);
 
   pthread_t client_thread;
 
@@ -248,12 +266,16 @@ void* TCP_handler(void* args){
   tcp_args_aux.surface_elevation = tcp_args->surface_elevation;
   tcp_args_aux.client_addr = client_addr;
 
+  printf("[TCP] Creating client handling thread...\n");
+
   /* Thread create */
   ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] [TCP] Failed to create TCP client thread!!!");
 
   /* Thread detach */
   ret = pthread_detach(client_thread);
+
+  printf("[TCP] Thread detached...\n");
 
   /* Chiusura thread */
   pthread_exit(0);
@@ -263,6 +285,9 @@ void* TCP_handler(void* args){
 
 /* Handler della connessione UDP con il client in modalità 'receiver' (riceve pacchetti) */
 void* UDP_receiver_handler(void* args) {
+
+  printf("[UDP RECEIVER] Handler started...\n");
+
   int ret;
 
   char buffer_recv[BUFFER_SIZE];
@@ -295,6 +320,9 @@ void* UDP_receiver_handler(void* args) {
 
 /* Handler della connessione UDP con il client in modalità 'sender' (invia pacchetti) */
 void* UDP_sender_handler(void* args) {
+
+  printf("[UDP SENDER] Handler started...\n");
+
   char buffer_send[BUFFER_SIZE];
 
   /* Creazione del pacchetto da inviare */
@@ -385,22 +413,26 @@ int main(int argc, char **argv) {
   /* Inizializza server TCP */
   tcp_socket = socket(AF_INET , SOCK_STREAM , 0);
   ERROR_HELPER(tcp_socket, "[TCP] Failed to create TCP socket");
+  if(tcp_socket>=0) printf("[TCP] Socket opened %d...\n", tcp_socket);
 
   struct sockaddr_in tcp_server_addr = {0};
   int sockaddr_len = sizeof(struct sockaddr_in);
-  tcp_server_addr.sin_addr.s_addr = INADDR_ANY;
+  tcp_server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
   tcp_server_addr.sin_family      = AF_INET;
-  tcp_server_addr.sin_port        = htons((uint16_t) TCP_PORT);
+  tcp_server_addr.sin_port        = htons(TCP_PORT);
 
   int reuseaddr_opt_tcp = 1;
   ret = setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &reuseaddr_opt_tcp, sizeof(reuseaddr_opt_tcp));
   ERROR_HELPER(ret, "[ERROR] [MAIN] [TCP] Failed setsockopt on TCP server socket!!!");
+  if(ret>=0) printf("[MAIN] [TCP] setsockopt worked...\n");
 
   ret = bind(tcp_socket, (struct sockaddr*) &tcp_server_addr, sockaddr_len);
   ERROR_HELPER(ret, "[ERROR] [MAIN] [TCP] Failed bind address on TCP server socket!!!");
+  if(ret>=0) printf("[MAIN] [TCP] Bind worked...\n");
 
-  ret = listen(tcp_socket, 16);
+  ret = listen(tcp_socket, 1024);
   ERROR_HELPER(ret, "[ERROR] [MAIN] [TCP] Failed listen on TCP server socket!!!");
+  if (ret>=0) printf("[MAIN] [TCP] Server listening on port %d...\n", TCP_PORT);
 
   fprintf(stdout, "[MAIN] [TCP] Server TCP started...\n");  // DEBUG OUTPUT
   /* Server TCP inizializzato */
@@ -443,6 +475,8 @@ int main(int argc, char **argv) {
   tcp_args.elevation_texture = surface_texture;
   tcp_args.surface_elevation = surface_elevation;
 
+  printf("[MAIN] Initializating threads...\n");
+
   /* Create dei thread */
   ret = pthread_create(&TCP_connection, NULL, TCP_handler, &tcp_args);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] [MAIN] Failed to create TCP connection thread!!!");
@@ -453,6 +487,9 @@ int main(int argc, char **argv) {
   ret = pthread_create(&UDP_receiver_thread, NULL, UDP_receiver_handler, NULL); 
   PTHREAD_ERROR_HELPER(ret, "[ERROR] [MAIN] Failed to create UDP receiver thread!!!");
 
+  printf("[MAIN] Threads created...\n");
+  printf("[MAIN] Joining threads...\n");
+
   /* Join dei thread */
   ret=pthread_join(TCP_connection,NULL);
   ERROR_HELPER(ret,"[ERROR] [MAIN] Failed to join TCP server connection thread!!!");
@@ -462,6 +499,9 @@ int main(int argc, char **argv) {
 
   ret=pthread_join(UDP_receiver_thread,NULL);
   ERROR_HELPER(ret,"[ERROR] [MAIN] Failed to join UDP server receiver thread!!!");
+
+  printf("[MAIN] Threads joined...\n");
+  printf("[MAIN] Closing...\n");
 
   /* Cleanup generale per liberare la memoria utilizzata */
   Image_free(surface_texture);

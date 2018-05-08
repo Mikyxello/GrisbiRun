@@ -10,17 +10,6 @@
 
 int window;
 
-typedef enum ViewType {Inside, Outside, Global} ViewType;
-
-typedef struct WorldViewer{
-  World* world;
-  float zoom;
-  float camera_z;
-  int window_width, window_height;
-  Vehicle* self;
-  ViewType view_type;
-} WorldViewer;
-
 WorldViewer viewer;
 
 void WorldViewer_run(WorldViewer* viewer,
