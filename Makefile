@@ -5,15 +5,15 @@ AR=ar
 
 
 BINS=libso_game.a\
-	 so_game_client\
+     so_game_client\
      so_game_server\
      test_packets_serialization
 
 OBJS = image.o\
        linked_list.o\
        so_game_protocol.o\
-       so_game_client.o\
        so_game_server.o\
+       so_game_client.o\
        surface.o\
        user_list.o\
        vec3.o\

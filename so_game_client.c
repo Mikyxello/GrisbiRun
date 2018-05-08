@@ -1,7 +1,7 @@
-
 #include <GL/glut.h>
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <arpa/inet.h>  // htons() and inet_addr()
@@ -17,8 +17,14 @@
 #include "world.h"
 #include "vehicle.h"
 #include "world_viewer.h"
+#include "so_game_protocol.h"
+#include "user_list.h"
 
-#define TIME_TO_SLEEP = 20000;
+#define TIME_TO_SLEEP   20000
+#define WORLDSIZE       4096
+#define SERVER_ADDRESS  "127.0.0.1"
+#define SERVER_PORT     8888
+
 
 int my_id;
 int window;
