@@ -182,6 +182,8 @@ void* TCP_client_handler (void* args){
 
   tcp_args_t* tcp_args = (tcp_args_t*) args;
 
+  printf("[TCP] With client descriptor %d...\n", tcp_args->client_desc);
+
   int tcp_client_desc = tcp_args->client_desc;
   int msg_length = 0;
   int ret;
@@ -199,36 +201,39 @@ void* TCP_client_handler (void* args){
   user->vehicle = NULL;
   User_insert_last(users, user);
 
-  printf("[TCP] User %d inserted...", user->id);
+  printf("[TCP] User %d inserted...\n", tcp_client_desc);
 
   /* Ricezione del pacchetto */
-  int packet_length = sizeof(PacketHeader);
-  while(msg_length < packet_length){
-  	ret = recv(tcp_client_desc, buffer_recv + msg_length, packet_length - msg_length, 0);
-  	if (ret==-1 && errno == EINTR) continue;
-  	ERROR_HELPER(ret, "[ERROR] [TCP Client Thread] Failed to receive packet!!!");
-  	msg_length += ret;
+  int packet_length = BUFFER_SIZE;
+  while(1) {
+    while( (ret = recv(tcp_client_desc, buffer_recv + msg_length, packet_length - msg_length, 0)) < 0){
+    	if (ret==-1 && errno == EINTR) continue;
+    	ERROR_HELPER(ret, "[ERROR] [TCP Client Thread] Failed to receive packet!!!");
+    	msg_length += ret;
+    }
+
+    /* Ricezione pacchetto per intero (tramite l'utilizzo di 'size' del PacketHeader ricevuto nel caso sia più grande */
+    /*
+    PacketHeader* header = (PacketHeader*) buffer_recv;
+    int size = header->size - packet_length;
+    msg_length=0;
+
+    while(msg_length < size){
+      ret = recv(tcp_client_desc, buffer_recv + msg_length + packet_length, size - msg_length, 0);
+      if (ret==-1 && errno == EINTR) continue;
+      ERROR_HELPER(ret, "[ERROR] [TCP Client Thread] Failed to receive packet!!!");
+      msg_length += ret;
+    }
+    */
+
+    printf("[TCP] Packet received...\n");
+
+    /* Gestione del pacchetto ricevuto tramite l'handler dei pacchetti */
+    ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture);
+
+    if (ret == 1) printf("[TCP Client Thread] Success\n");
+    else printf("[TCP Client Thread] Failed\n");
   }
-
-  /* Ricezione pacchetto per intero (tramite l'utilizzo di 'size' del PacketHeader ricevuto (in caso sia più grande di un PacketHeader) */
-  PacketHeader* header = (PacketHeader*) buffer_recv;
-  int size = header->size - packet_length;
-  msg_length=0;
-
-  while(msg_length < size){
-    ret = recv(tcp_client_desc, buffer_recv + msg_length + packet_length, size - msg_length, 0);
-    if (ret==-1 && errno == EINTR) continue;
-    ERROR_HELPER(ret, "[ERROR] [TCP Client Thread] Failed to receive packet!!!");
-    msg_length += ret;
-  }
-
-  printf("[TCP] Packet received...");
-
-  /* Gestione del pacchetto ricevuto tramite l'handler dei pacchetti */
-  ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture);
-
-  if (ret == 1) printf("[TCP Client Thread] Success\n");
-  else printf("[TCP Client Thread] Failed\n");
 
   /* Chiusura thread */
   pthread_exit(0);
@@ -266,16 +271,17 @@ void* TCP_handler(void* args){
   tcp_args_aux.surface_elevation = tcp_args->surface_elevation;
   tcp_args_aux.client_addr = client_addr;
 
-  printf("[TCP] Creating client handling thread...\n");
+  printf("[TCP] Creating client handling thread for %d...\n", tcp_args_aux.client_desc);
 
   /* Thread create */
   ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] [TCP] Failed to create TCP client thread!!!");
 
-  /* Thread detach */
-  ret = pthread_detach(client_thread);
+  /* Thread join */
+  ret=pthread_join(client_thread, NULL);
+  ERROR_HELPER(ret,"[ERROR] [MAIN] Failed to join TCP client handling thread!!!");
 
-  printf("[TCP] Thread detached...\n");
+  printf("[TCP] Thread joined...\n");
 
   /* Chiusura thread */
   pthread_exit(0);
@@ -430,7 +436,7 @@ int main(int argc, char **argv) {
   ERROR_HELPER(ret, "[ERROR] [MAIN] [TCP] Failed bind address on TCP server socket!!!");
   if(ret>=0) printf("[MAIN] [TCP] Bind worked...\n");
 
-  ret = listen(tcp_socket, 1024);
+  ret = listen(tcp_socket, 0);
   ERROR_HELPER(ret, "[ERROR] [MAIN] [TCP] Failed listen on TCP server socket!!!");
   if (ret>=0) printf("[MAIN] [TCP] Server listening on port %d...\n", TCP_PORT);
 
