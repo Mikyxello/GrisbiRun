@@ -39,11 +39,13 @@ World world;
 UserHead* users; 	// Inizio lista utenti per ricerca
 
 /* Gestione pacchetti TCP ricevuti */
-int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture) {
+int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture,int buffer_len) {
+  char ready_buffer[4]; //usato come ok dal server
   PacketHeader* header = (PacketHeader*) buffer;  // Pacchetto per controllo del tipo di richiesta
 
   /* Se la richiesta dal client a questo server è per l'ID (invia l'id assegnato al client che lo richiede) */
   if (header->type == GetId) {
+    printf("[TCP] GetId found!...\n");
     // Crea un IdPacket utilizzato per mandare l'id assegnato dal server al client (specifica struct per ID)
     IdPacket* id_to_send = (IdPacket*) malloc(sizeof(IdPacket));
 
@@ -77,6 +79,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
 
   /* Se la richiesta dal client a questo server è per la texture della mappa */
   else if (header->type == GetTexture) {
+    printf("[TCP] GetTexture found!...\n");
     // Converto il pacchetto ricevuto in un ImagePacket per estrarne la texture richiesta
     ImagePacket* texture_request = (ImagePacket*) buffer;
     int id_request = texture_request->id;
@@ -115,6 +118,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
 
   /* Se la richiesta dal client a questo server è per la elevation surface */
   else if (header->type == GetElevation) {
+    printf("[TCP] GetElevation found!...\n");
     // Converto il pacchetto ricevuto in un ImagePacket per estrarne la elevation richiesta
     ImagePacket* elevation_request = (ImagePacket*) buffer;
     int id_request = elevation_request->id;
@@ -153,6 +157,10 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
 
   /* Se il server riceve una texture dal client */
   else if (header->type == PostTexture) {
+    printf("[TCP] PostTexture found!...\n");
+
+    if (buffer_len<header->size) return -1;
+
     PacketHeader* received_header = Packet_deserialize(buffer, header->size);
     ImagePacket* received_texture = (ImagePacket*) received_header;
     
@@ -165,13 +173,18 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
 
     fprintf(stdout, "[TCP] Texture received from %d...\n", id);   // DEBUG OUTPUT
 
+    int ret = send(tcp_socket, ready_buffer, 4,0); //SEERVER OKAY!
+
+    printf("[TCP] Server ready!...\n");
+
     return 1;
   }
 
   /* Nel caso si verificasse un errore */
-  else fprintf(stdout, "[ERROR] Unknown packet received %d!!!\n", id);   // DEBUG OUTPUT
-
-  return -1;  // Return in caso di errore
+  else{
+    printf("[ERROR] found %d... \n", header->type);
+    return -1; 
+  }
 }
 
 
@@ -205,11 +218,11 @@ void* TCP_client_handler (void* args){
 
   /* Ricezione del pacchetto */
   int packet_length = BUFFER_SIZE;
+  int bytes_recv = 0;
   while(1) {
     while( (ret = recv(tcp_client_desc, buffer_recv + msg_length, packet_length - msg_length, 0)) < 0){
     	if (ret==-1 && errno == EINTR) continue;
     	ERROR_HELPER(ret, "[ERROR] [TCP Client Thread] Failed to receive packet!!!");
-    	msg_length += ret;
     }
 
     /* Ricezione pacchetto per intero (tramite l'utilizzo di 'size' del PacketHeader ricevuto nel caso sia più grande */
@@ -225,14 +238,24 @@ void* TCP_client_handler (void* args){
       msg_length += ret;
     }
     */
+    bytes_recv += ret;
 
     printf("[TCP] Packet received...\n");
+    printf("[TCP] Received : %d bytes...\n",bytes_recv);
 
     /* Gestione del pacchetto ricevuto tramite l'handler dei pacchetti */
-    ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture);
+    ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture,bytes_recv);
 
-    if (ret == 1) printf("[TCP Client Thread] Success\n");
-    else printf("[TCP Client Thread] Failed\n");
+    if (ret == 1){
+      printf("[TCP Client Thread] Success\n");
+      bytes_recv = 0;
+      msg_length = 0;
+    }
+    else {
+      printf("[TCP Client Thread] Failed\n");
+      printf("[TCP Client Thread] try to save the packet!\n");
+      msg_length += bytes_recv;
+    }
   }
 
   /* Chiusura thread */
