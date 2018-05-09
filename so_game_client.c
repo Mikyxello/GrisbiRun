@@ -177,10 +177,10 @@ void recv_ID(int* my_id, int socket_desc) {
   printf("[TCP] ID loaded: %d...\n", *my_id);
   
   // Libera la memoria non più utilizzata 
-  Packet_free(&id_recv->header);
-  Packet_free(&packet->header);
-  free(id_recv);
-  free(packet);
+  //Packet_free(&id_recv->header);
+  //Packet_free(&packet->header);
+  //free(id_recv);
+  //free(packet);
 }
 
 
@@ -238,10 +238,10 @@ void recv_Texture(Image** map_texture, int socket_desc) {
 
   printf("[TCP] Texture loaded...\n");
 
-  Packet_free(&packet->header);
-  Packet_free(&texture_recv->header);
-  free(texture_recv);
-  free(packet);
+  //Packet_free(&packet->header);
+  //Packet_free(&texture_recv->header);
+  //free(texture_recv);
+  //free(packet);
 }
 
 
@@ -300,10 +300,10 @@ void recv_Elevation(Image** map_elevation, int socket_desc) {
 
   printf("[TCP] Elevation loaded...\n");
 
-  Packet_free(&packet->header);
-  Packet_free(&elevation_packet->header);
-  free(elevation_packet);
-  free(packet);
+  //Packet_free(&packet->header);
+  //Packet_free(&elevation_packet->header);
+  //free(elevation_packet);
+  //free(packet);
 }
 
 /* ------------------------------------- */
@@ -362,8 +362,8 @@ void send_Texture(Image** my_texture, Image** my_texture_from_server, int socket
   printf("[TCP] Received texture back from server...\n");
 
   // Libera la memoria non più utilizzata
-  Packet_free(&packet->header);
-  free(packet);
+  //Packet_free(&packet->header);
+  //free(packet);
 }
 
 
@@ -394,6 +394,9 @@ void serverHandshake (int* socket_desc, int* my_id, Image** my_texture, Image** 
   send_Texture(my_texture, my_texture_from_server, *socket_desc);
   
   // TODO: Chiudere connessione in TCP col server e aprirne una UDP per le update
+  ret = close(*socket_desc);
+  if (ret) printf("[TCP] Socket closed...\n");
+  else printf("[ERROR] Cannot close socket!!!\n");
 
   return;
 }
