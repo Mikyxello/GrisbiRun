@@ -24,7 +24,7 @@
 #define UDP_PORT        8888          // Porta per la connessione UDP
 #define SERVER_ADDRESS  "127.0.0.1"   // Indirizzo del server (localhost)
 
-/* Struttura per args dei threads in TCP */
+// Struttura per args dei threads in TCP
 typedef struct {
 	int client_desc;
 	struct sockaddr_in client_addr;
@@ -32,20 +32,20 @@ typedef struct {
 	Image* surface_elevation;
 } tcp_args_t;
 
-/* Definizione Socket e variabili 'globali' */
+// Definizione Socket e variabili 'globali'
 int tcp_socket, udp_socket;
 World world;
-
 UserHead* users; 	// Inizio lista utenti per ricerca
 
 /* Gestione pacchetti TCP ricevuti */
-int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture,int buffer_len) {
-  char ready_buffer[4]; //usato come ok dal server
+int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture, int len) {
   PacketHeader* header = (PacketHeader*) buffer;  // Pacchetto per controllo del tipo di richiesta
 
-  /* Se la richiesta dal client a questo server è per l'ID (invia l'id assegnato al client che lo richiede) */
+  // Se la richiesta dal client a questo server è per l'ID (invia l'id assegnato al client che lo richiede)
   if (header->type == GetId) {
-    printf("[TCP] GetId found!...\n");
+
+    printf("[TCP] ID requested from %d...\n", id);
+
     // Crea un IdPacket utilizzato per mandare l'id assegnato dal server al client (specifica struct per ID)
     IdPacket* id_to_send = (IdPacket*) malloc(sizeof(IdPacket));
 
@@ -72,14 +72,16 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Packet_free(&(id_to_send->header));   // Libera la memoria del pacchetto non più utilizzato
     free(id_to_send);
 
-    fprintf(stdout, "[TCP] ID sent to %d...\n", id);  // DEBUG OUTPUT
+    printf("[TCP] ID sent to %d (size = %d)...\n", id, bytes_sent);  // DEBUG OUTPUT
 
     return 1;
   }
 
-  /* Se la richiesta dal client a questo server è per la texture della mappa */
+  // Se la richiesta dal client a questo server è per la texture della mappa
   else if (header->type == GetTexture) {
-    printf("[TCP] GetTexture found!...\n");
+
+    printf("[TCP] Texture requested from %d...\n", id);
+
     // Converto il pacchetto ricevuto in un ImagePacket per estrarne la texture richiesta
     ImagePacket* texture_request = (ImagePacket*) buffer;
     int id_request = texture_request->id;
@@ -87,7 +89,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     // Preparo header per la risposta
     PacketHeader header_send;
     header_send.type = PostTexture;
-    
+ 
     // Preparo il pacchetto per inviare la texture al client
     ImagePacket* texture_to_send = (ImagePacket*) malloc(sizeof(ImagePacket));
     texture_to_send->header = header_send;
@@ -111,14 +113,16 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Packet_free(&(texture_to_send->header));   // Libera la memoria del pacchetto non più utilizzato
     free(texture_to_send);
 
-    fprintf(stdout, "[TCP] Texture sent to %d...\n", id);   // DEBUG OUTPUT
+    printf("[TCP] Texture sent to %d (size = %d)...\n", id, bytes_sent);   // DEBUG OUTPUT
 
     return 1;
   }
 
-  /* Se la richiesta dal client a questo server è per la elevation surface */
+  // Se la richiesta dal client a questo server è per la elevation surface
   else if (header->type == GetElevation) {
-    printf("[TCP] GetElevation found!...\n");
+
+    printf("[TCP] Elevation requested from %d...\n", id);
+
     // Converto il pacchetto ricevuto in un ImagePacket per estrarne la elevation richiesta
     ImagePacket* elevation_request = (ImagePacket*) buffer;
     int id_request = elevation_request->id;
@@ -150,20 +154,27 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Packet_free(&(elevation_to_send->header));   // Libera la memoria del pacchetto non più utilizzato
     free(elevation_to_send);
 
-    fprintf(stdout, "[TCP] Elevation sent to %d...\n", id);   // DEBUG OUTPUT
+    printf("[TCP] Elevation sent to %d (size = %d)...\n", id, bytes_sent);   // DEBUG OUTPUT
 
     return 1;
   }
 
-  /* Se il server riceve una texture dal client */
+  // Se il server riceve una texture dal client
   else if (header->type == PostTexture) {
-    printf("[TCP] PostTexture found!...\n");
+    //int ret;
+ 
+    if (len < header->size) {
+      //printf("[TCP] Actual packet (size = %d)...\n", len);
+      return -1;
+    }
 
-    if (buffer_len<header->size) return -1;
-
+    // Deserializzazione del pacchetto
     PacketHeader* received_header = Packet_deserialize(buffer, header->size);
     ImagePacket* received_texture = (ImagePacket*) received_header;
+
+    printf("[TCP] Vehicle sent from %d...\n", id);
     
+    //  Aggiunta veicolo nuovo al mondo
     Vehicle* new_vehicle = malloc(sizeof(Vehicle));
     Vehicle_init(new_vehicle, &world, id, received_texture->image);
     World_addVehicle(&world, new_vehicle);
@@ -171,40 +182,36 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
    	Packet_free(received_header);	// Libera la memoria del pacchetto non più utilizzato
     free(received_texture);
 
-    fprintf(stdout, "[TCP] Texture received from %d...\n", id);   // DEBUG OUTPUT
-
-    int ret = send(tcp_socket, ready_buffer, 4,0); //SEERVER OKAY!
-
-    printf("[TCP] Server ready!...\n");
+    printf("[TCP] Vehicle loaded from %d...\n", id);   // DEBUG OUTPUT
 
     return 1;
   }
 
-  /* Nel caso si verificasse un errore */
-  else{
-    printf("[ERROR] found %d... \n", header->type);
-    return -1; 
+  // Nel caso il pacchetto sia sconosciuto
+  else {
+    printf("[ERROR] Unknown packet received from %d!!!\n", id);   // DEBUG OUTPUT
+
   }
+
+  return -1;  // Return in caso di errore
 }
 
 
 
 /* Gestione del thread del client per aggiunta del client alla lista e controllo pacchetti tramite TCP_packet (DA COMPLETARE) */
 void* TCP_client_handler (void* args){
-  printf("[TCP] Handling client...\n");
-
   tcp_args_t* tcp_args = (tcp_args_t*) args;
 
-  printf("[TCP] With client descriptor %d...\n", tcp_args->client_desc);
+  printf("[TCP] Handling client with client descriptor (%d)...\n", tcp_args->client_desc);
 
   int tcp_client_desc = tcp_args->client_desc;
   int msg_length = 0;
   int ret;
   char buffer_recv[BUFFER_SIZE];	// Conterrà il PacketHeader
 
-  printf("[TCP] Creating user...\n");
+  printf("[TCP] Creating user with id (%d)...\n", tcp_client_desc);
 
-  /* Inserimento utente in lista */
+  // Inserimento utente in lista
   User* user = (User*) malloc(sizeof(User));
   user->id = tcp_client_desc;
   user->user_addr_tcp = tcp_args->client_addr;
@@ -214,51 +221,42 @@ void* TCP_client_handler (void* args){
   user->vehicle = NULL;
   User_insert_last(users, user);
 
-  printf("[TCP] User %d inserted...\n", tcp_client_desc);
+  printf("[TCP] User (%d) inserted...\n", tcp_client_desc);
 
-  /* Ricezione del pacchetto */
+  // Ricezione del pacchetto
   int packet_length = BUFFER_SIZE;
-  int bytes_recv = 0;
   while(1) {
     while( (ret = recv(tcp_client_desc, buffer_recv + msg_length, packet_length - msg_length, 0)) < 0){
     	if (ret==-1 && errno == EINTR) continue;
-    	ERROR_HELPER(ret, "[ERROR] [TCP Client Thread] Failed to receive packet!!!");
+    	ERROR_HELPER(ret, "[ERROR] Failed to receive packet!!!");
+    }
+    if (ret == 0) {
+      printf("[TCP] Connection closed with (%d)...\n", user->id);
+      break;
     }
 
-    /* Ricezione pacchetto per intero (tramite l'utilizzo di 'size' del PacketHeader ricevuto nel caso sia più grande */
-    /*
-    PacketHeader* header = (PacketHeader*) buffer_recv;
-    int size = header->size - packet_length;
-    msg_length=0;
+    msg_length += ret;
 
-    while(msg_length < size){
-      ret = recv(tcp_client_desc, buffer_recv + msg_length + packet_length, size - msg_length, 0);
-      if (ret==-1 && errno == EINTR) continue;
-      ERROR_HELPER(ret, "[ERROR] [TCP Client Thread] Failed to receive packet!!!");
-      msg_length += ret;
-    }
-    */
-    bytes_recv += ret;
+    printf("[TCP] Received packet (total size = %d)...\n", ((PacketHeader*) buffer_recv)->size);
 
-    printf("[TCP] Packet received...\n");
-    printf("[TCP] Received : %d bytes...\n",bytes_recv);
+    // Gestione del pacchetto ricevuto tramite l'handler dei pacchetti
+    ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture, msg_length);
 
-    /* Gestione del pacchetto ricevuto tramite l'handler dei pacchetti */
-    ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture,bytes_recv);
-
-    if (ret == 1){
-      printf("[TCP Client Thread] Success\n");
-      bytes_recv = 0;
+    if (ret == 1) {
+      printf("[TCP] Success...\n");
       msg_length = 0;
     }
     else {
-      printf("[TCP Client Thread] Failed\n");
-      printf("[TCP Client Thread] try to save the packet!\n");
-      msg_length += bytes_recv;
+      printf("[TCP] Next packet...\n");
     }
   }
 
-  /* Chiusura thread */
+  // Chiusura socket
+  ret = close(tcp_client_desc);
+  if (ret) printf("[TCP] Socket closed with client (%d)...\n", tcp_client_desc);
+  else printf("[ERROR] Error closing socket with client!!!\n");
+
+  // Chiusura thread
   pthread_exit(0);
 }
 
@@ -266,47 +264,51 @@ void* TCP_client_handler (void* args){
 
 /* Handler della connessione TCP con il client (nel thread) */
 void* TCP_handler(void* args){
-
   printf("[TCP] Handler started...\n");
 
   int ret;
 
-  printf("[TCP] Casting tcp args...\n");
-
   tcp_args_t* tcp_args = (tcp_args_t*) args;	// Cast degli args da void a tcp_args_t
 
-  printf("[TCP] Args casted...\n");
   printf("[TCP] Accepting connection from clients...\n");
 
-  int sockaddr_len = sizeof(struct sockaddr_in);
-  struct sockaddr_in client_addr;
-  int tcp_client_desc = accept(tcp_socket, (struct sockaddr*)&client_addr, (socklen_t*) &sockaddr_len);   // Accetta nuova connessione dal client
-  ERROR_HELPER(tcp_client_desc, "[ERROR] Failed to accept client TCP connection!!!");
+  while(1) {
+    int sockaddr_len = sizeof(struct sockaddr_in);
+    struct sockaddr_in client_addr;
+    int tcp_client_desc = accept(tcp_socket, (struct sockaddr*)&client_addr, (socklen_t*) &sockaddr_len);   // Accetta nuova connessione dal client
+    ERROR_HELPER(tcp_client_desc, "[ERROR] Failed to accept client TCP connection!!!");
 
-  if (tcp_client_desc>=0) printf("[TCP] Connection enstablished with %d...\n", tcp_client_desc);
+    if (tcp_client_desc>=0) printf("[TCP] Connection enstablished with %d...\n", tcp_client_desc);
 
-  pthread_t client_thread;
+    pthread_t client_thread;
 
-  /* args del thread client */
-  tcp_args_t tcp_args_aux;
-  tcp_args_aux.client_desc = tcp_client_desc;
-  tcp_args_aux.elevation_texture = tcp_args->elevation_texture;
-  tcp_args_aux.surface_elevation = tcp_args->surface_elevation;
-  tcp_args_aux.client_addr = client_addr;
+    // args del thread client
+    tcp_args_t tcp_args_aux;
+    tcp_args_aux.client_desc = tcp_client_desc;
+    tcp_args_aux.elevation_texture = tcp_args->elevation_texture;
+    tcp_args_aux.surface_elevation = tcp_args->surface_elevation;
+    tcp_args_aux.client_addr = client_addr;
 
-  printf("[TCP] Creating client handling thread for %d...\n", tcp_args_aux.client_desc);
+    printf("[TCP] Creating client handling thread for %d...\n", tcp_args_aux.client_desc);
 
-  /* Thread create */
-  ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
-  PTHREAD_ERROR_HELPER(ret, "[ERROR] [TCP] Failed to create TCP client thread!!!");
+    // Thread create
+    ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
+    PTHREAD_ERROR_HELPER(ret, "[ERROR] Failed to create TCP client thread!!!");
 
-  /* Thread join */
-  ret=pthread_join(client_thread, NULL);
-  ERROR_HELPER(ret,"[ERROR] [MAIN] Failed to join TCP client handling thread!!!");
+    // Thread join
+    ret=pthread_join(client_thread, NULL);
+    ERROR_HELPER(ret,"[ERROR] Failed to join TCP client handling thread!!!");
 
-  printf("[TCP] Thread joined...\n");
+    printf("[TCP] Thread joined...\n");
+  }
 
-  /* Chiusura thread */
+  // Chiusura socket e libera memoria 
+  ret = close(tcp_socket);
+  if (ret) printf("[TCP] Socket closed...\n");
+  else printf("[ERROR] Error closing socket!!!\n");
+  //free(tcp_args);
+
+  // Chiusura thread
   pthread_exit(0);
 }
 
@@ -314,7 +316,6 @@ void* TCP_handler(void* args){
 
 /* Handler della connessione UDP con il client in modalità 'receiver' (riceve pacchetti) */
 void* UDP_receiver_handler(void* args) {
-
   printf("[UDP RECEIVER] Handler started...\n");
 
   int ret;
@@ -326,20 +327,22 @@ void* UDP_receiver_handler(void* args) {
   ret = recvfrom(udp_socket, buffer_recv, BUFFER_SIZE, 0, (struct sockaddr*)&client_addr, &addrlen);
   ERROR_HELPER(ret, "[ERROR] [UDP RECEIVER] Error receiving UDP packet!!!");
 
-  /* Raccoglie il pacchetto ricevuto */
+  // Raccoglie il pacchetto ricevuto
   PacketHeader* header = (PacketHeader*)buffer_recv;
 
   VehicleUpdatePacket* packet = (VehicleUpdatePacket*)Packet_deserialize(buffer_recv, header->size);
   User* user = User_find_id(users, packet->id);
 
-  if(!user) 
+  if(!user) {
   	printf("[ERROR] [UDP RECEIVER] Cannot find a user with this ID: %d!!!\n", packet->id);
+    pthread_exit(0);
+  }
   
-  /* Aggiorna la posizione dell'utente */
+  // Aggiorna la posizione dell'utente
   Vehicle_setForcesUpdate(user->vehicle, packet->translational_force, packet->rotational_force);
   //Vehicle_setXYTheta(user->vehicle, packet->x, packet->y, packet->theta);
   
-  /* Update del mondo */
+  // Update del mondo
   World_update(&world);
 
   Packet_free(&packet->header);	// Liberazione memoria utilizzata
@@ -349,12 +352,11 @@ void* UDP_receiver_handler(void* args) {
 
 /* Handler della connessione UDP con il client in modalità 'sender' (invia pacchetti) */
 void* UDP_sender_handler(void* args) {
-
   printf("[UDP SENDER] Handler started...\n");
 
   char buffer_send[BUFFER_SIZE];
 
-  /* Creazione del pacchetto da inviare */
+  // Creazione del pacchetto da inviare
   PacketHeader header;
   header.type = WorldUpdate;
 
@@ -363,7 +365,7 @@ void* UDP_sender_handler(void* args) {
 
   int n_users = 0;
  
-  /* Conta il numero di utenti collegati */
+  // Conta il numero di utenti collegati
   User* user = users->first;
   while(user != NULL) {
     n_users++;
@@ -383,19 +385,19 @@ void* UDP_sender_handler(void* args) {
     user = user->next;
   }
 
-  /* Serializzazione del pacchetto per update nel buffer */
+  // Serializzazione del pacchetto per update nel buffer
   int size = Packet_serialize(buffer_send, &world_update->header);
 
   user = users->first;
 
-  /* Invia i pacchetti a tutti gli utenti connessi */
+  // Invia i pacchetti a tutti gli utenti connessi
   while (user != NULL) {
     int ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*)&user->user_addr_udp, (socklen_t)sizeof(user->user_addr_udp));
     ERROR_HELPER(ret, "[ERROR] [UDP SENDER] Error sending update to user!!!");
     user = user->next;
   }
 
-  /* Liberazione memoria */
+  // Liberazione memoria
   free(world_update);
   pthread_exit(0);
 }
@@ -453,7 +455,7 @@ int main(int argc, char **argv) {
   int reuseaddr_opt_tcp = 1;
   ret = setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &reuseaddr_opt_tcp, sizeof(reuseaddr_opt_tcp));
   ERROR_HELPER(ret, "[ERROR] [MAIN] [TCP] Failed setsockopt on TCP server socket!!!");
-  if(ret>=0) printf("[MAIN] [TCP] setsockopt worked...\n");
+  if(ret>=0) printf("[MAIN] [TCP] Setsockopt worked...\n");
 
   ret = bind(tcp_socket, (struct sockaddr*) &tcp_server_addr, sockaddr_len);
   ERROR_HELPER(ret, "[ERROR] [MAIN] [TCP] Failed bind address on TCP server socket!!!");

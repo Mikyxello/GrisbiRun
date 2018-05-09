@@ -41,11 +41,9 @@ typedef struct udpArgs{
     int socket_tcp;
 }udpArgs;
 
-int my_id;
 int window;
 World world;
 Vehicle* vehicle; // The vehicle
-int socket_desc; //socket tcp
 struct timeval last_update_time;
 int server_connected;
 localWorld player_world;
@@ -142,158 +140,239 @@ void* world_updater(){
 }
 */
 
-void* serverHandshake (int* my_id, Image** mytexture,Image** map_elevation,Image** map_texture,Image** my_texture_from_server){
 
+ /* ----------------- */
+ /* GetId dell'utente */
+ /* ----------------- */
+void recv_ID(int* my_id, int socket_desc) {
+  int ret;
+  char buffer[BUFFER_SIZE];
+
+  printf("[TCP] Requesting ID...\n");
+  PacketHeader header;
+  header.type = GetId;
+  
+  IdPacket* packet = (IdPacket*)malloc(sizeof(IdPacket));
+  packet->header = header;
+  packet->id = -1;
+
+  int buffer_size = Packet_serialize(buffer, &packet->header);
+
+  /* Invia la richiesta */
+  while ( (ret = send(socket_desc, buffer, buffer_size, 0)) < 0 ) {
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "[ERROR] Cannot write to socket!!!");
+  }
+
+  printf("[TCP] ID request sent (size = %d)...\n", buffer_size);
+  printf("[TCP] Waiting for ID receiving...\n");
+
+  /* Riceve l'id */
+  while ( (buffer_size = recv(socket_desc, buffer, BUFFER_SIZE, 0)) < 0 ) { //ricevo ID dal server
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "[ERROR] Cannot read from socket!!!");
+  }
+
+  printf("[TCP] ID received (size = %d)...\n", buffer_size);
+
+  /* Prende l'id ricevuto e lo inserisce in my_id */
+  IdPacket* id_recv = (IdPacket*) Packet_deserialize(buffer,buffer_size);
+  *my_id = id_recv->id;
+
+  printf("[TCP] ID loaded: %d...\n", *my_id);
+  
+  /* Libera la memoria non più utilizzata */
+  Packet_free(&id_recv->header);
+  Packet_free(&packet->header);
+  free(id_recv);
+  free(packet);
+}
+
+
+/* ------------------------------------ */
+/* GetTexture della texture della mappa */
+/* ------------------------------------ */
+void recv_Texture(Image** map_texture, int socket_desc) {
+  int ret;
+  char buffer[BUFFER_SIZE];
+
+  printf("[TCP] Requesting texture...\n");
+  PacketHeader header;
+  header.type = GetTexture;
+
+  ImagePacket* packet = (ImagePacket*) malloc(sizeof(ImagePacket));
+  packet->image = NULL;
+  packet->header = header;
+
+  int buffer_size = Packet_serialize(buffer, &packet->header);
+
+  /* Invia la richiesta */
+  while ( (ret = send(socket_desc, buffer, buffer_size, 0)) < 0 ) {
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "[ERROR] Cannot write to socket!!!");
+  }
+
+  printf("[TCP] Texture request sent (size = %d)...\n", buffer_size);
+  printf("[TCP] Waiting for texture receiving...\n");
+
+  int actual_size = 0;
+  buffer_size = 0;
+  while(1) {
+    /* Riceve la texture della mappa */
+    while ( (buffer_size += recv(socket_desc, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
+      if (errno == EINTR) continue;
+      ERROR_HELPER(-1, "[ERROR] Cannot read from socket!!!");
+    }
+
+    printf("[TCP] Texture received (size = %d)...\n", buffer_size);
+
+    // Dimensione totale del pacchetto da ricevere
+    actual_size = ((PacketHeader*) buffer)->size;
+
+    // Se la dimensione del pacchetto ricevuto è ancora minore della dimensione del pacchetto totale aspetta le altre parti
+    if (buffer_size < actual_size) {
+      printf("[TCP] Next packet...\n");
+      continue;
+    }
+    else break;
+  }
+
+  /* Load della texture della mappa */
+  ImagePacket* texture_recv = (ImagePacket*) Packet_deserialize(buffer, buffer_size);
+  *map_texture = texture_recv->image;
+
+  printf("[TCP] Texture loaded...\n");
+
+  Packet_free(&packet->header);
+  Packet_free(&texture_recv->header);
+  free(texture_recv);
+  free(packet);
+}
+
+
+/* -------------------------------------- */
+/* GetElevation della texture della mappa */
+/* -------------------------------------- */
+void recv_Elevation(Image** map_elevation, int socket_desc) {
+  int ret;
+  char buffer[BUFFER_SIZE];
+
+  printf("[TCP] Requesting elevation...\n");
+  PacketHeader header;
+  header.type = GetElevation;
+
+  ImagePacket* packet = (ImagePacket*) malloc(sizeof(ImagePacket));
+  packet->image = NULL;
+  packet->header = header;
+
+  // Serializza il pacchetto
+  int buffer_size = Packet_serialize(buffer, &packet->header);
+
+  /* Invia la richiesta */
+  while ( (ret = send(socket_desc, buffer, buffer_size, 0)) < 0 ) {
+    if (errno == EINTR) continue;
+    ERROR_HELPER(-1, "[ERROR] Cannot write to socket!!!");
+  }
+
+  printf("[TCP] Elevation request sent (size = %d)...\n", buffer_size);
+  printf("[TCP] Waiting for elevation receiving...\n");
+
+  int actual_size = 0;
+  buffer_size = 0;
+  while(1) {
+    /* Riceve la elevation della mappa */
+    while ( (buffer_size += recv(socket_desc, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
+      if (errno == EINTR) continue;
+      ERROR_HELPER(-1, "[ERROR] Cannot read from socket!!!");
+    }
+
+    printf("[TCP] Elevation received (size = %d)...\n", buffer_size);
+
+    // Dimensione totale del pacchetto da ricevere
+    actual_size = ((PacketHeader*) buffer)->size;
+
+    // Se la dimensione del pacchetto ricevuto è ancora minore della dimensione del pacchetto totale aspetta le altre parti
+    if (buffer_size < actual_size) {
+      printf("[TCP] Next packet...\n");
+      continue;
+    }
+    else break;
+  }
+
+  /* Load della elevation della mappa */
+  ImagePacket* elevation_packet = (ImagePacket*) Packet_deserialize(buffer, buffer_size);
+  *map_elevation = elevation_packet->image;
+
+  printf("[TCP] Elevation loaded...\n");
+
+  Packet_free(&packet->header);
+  Packet_free(&elevation_packet->header);
+  free(elevation_packet);
+  free(packet);
+}
+
+/* ------------------------------------- */
+/* PostTexture della texture del veicolo */
+/* ------------------------------------- */
+void send_Texture(Image** my_texture, int socket_desc) {
+  int ret;
+  char buffer[BUFFER_SIZE];
+
+  printf("[TCP] Sending texture...\n");
+  PacketHeader header;
+  header.type = PostTexture;
+
+  ImagePacket* packet = (ImagePacket*)malloc(sizeof(ImagePacket));
+  packet->image = *my_texture;
+  packet->header = header;
+
+  int buffer_size = Packet_serialize(buffer, &packet->header);
+  
+  /* Invia la texture */
+  while ( (ret = send(socket_desc, buffer, buffer_size, 0)) < 0) {
+    if (errno == EINTR) continue;
+    ERROR_HELPER(ret, "[ERROR] Cannot write to socket!!!");
+  }
+
+  printf("[TCP] Vehicle texture sent (size = %d)...\n", buffer_size);
+
+  /* Libera la memoria non più utilizzata */
+  Packet_free(&packet->header);
+  free(packet);
+}
+
+
+void* serverHandshake (int* socket_desc, int* my_id, Image** my_texture, Image** map_elevation,Image** map_texture, Image** my_texture_from_server){
+  int ret;
   printf("[TCP] Handsaking started...\n");
 
-	int ret=1, bytes_sent, bytes_recv;
-	char image_packet_buffer[BUFFER_SIZE];
-	char id_packet_buffer[BUFFER_SIZE];
-    char texture_packet_buffer[BUFFER_SIZE];
-    char Gettexture_packet_buffer[BUFFER_SIZE];
-
   struct sockaddr_in server_addr = {0};
-
-  socket_desc = socket(AF_INET, SOCK_STREAM, 0);
-  ERROR_HELPER(socket_desc, "Could not create socket");
-  if (socket_desc >= 0) printf("[TCP] Socket opened %d...\n", socket_desc);
+  *socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+  ERROR_HELPER(*socket_desc, "[ERROR] Could not create socket!!!");
+  if (*socket_desc >= 0) 
+    printf("[TCP] Socket opened %d...\n", *socket_desc);
 
   server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDRESS);
   server_addr.sin_family      = AF_INET;
-  server_addr.sin_port        = htons(SERVER_PORT); // don't forget about network byte order!
+  server_addr.sin_port        = htons(SERVER_PORT);
 
-  if (connect(socket_desc, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in))) fprintf(stdout, "Connection established!\n");
-  ERROR_HELPER(ret, "Could not create connection");
+  ret = connect(*socket_desc, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in)); 
+  ERROR_HELPER(ret, "[ERROR] Could not create connection!!!");  
 
-  printf("[TCP] Generating IdPacket...\n");
-  
-  /* GetId */
-  IdPacket* idpack = (IdPacket*)malloc(sizeof(IdPacket));
-  
-  PacketHeader id_head;
-  id_head.type = GetId;
-  
-  idpack->header = id_head;
-  idpack->id = -1;    
-  
-  printf("[TCP] Serializing packet...\n.. sending id : -1\n.. sending header : GetId\n");
+  if (ret >= 0) 
+    printf("[TCP] Connection enstablished...\n");
 
-  bytes_sent = Packet_serialize(id_packet_buffer, &idpack->header);
-  
-  printf("[TCP] Packet serialized...\n");
-  printf("[TCP] Sending packet %d...\n", bytes_sent);
+  /* Esegue i 4 scambi in TCP */
+  recv_ID(my_id, *socket_desc);
+  recv_Texture(map_texture, *socket_desc);
+  recv_Elevation(map_elevation, *socket_desc);
+  send_Texture(my_texture, *socket_desc);
 
-  /* Invia il pacchetto per GetId */
-  while ( (ret = send(socket_desc, id_packet_buffer, bytes_sent, 0)) < 0 ) {
-    if (errno == EINTR) continue;
-    ERROR_HELPER(-1, "Cannot write to socket");
-  }
+  /* Chiusura connessione */
+  ret = close(*socket_desc);
+  if (ret) printf("[TCP] Socket closed...\n");
+  else printf("[ERROR] Cannot close socket!!!\n");
 
-  printf("[TCP] Packet sent %d...\n", ret);
-  printf("[TCP] Waiting for packet receiving...\n");
-
-  /* Riceve l'id */
-  while ( (bytes_recv = recv(socket_desc, id_packet_buffer, BUFFER_SIZE, 0)) < 0 ) { //ricevo ID dal server
-    if (errno == EINTR) continue;
-    ERROR_HELPER(-1, "Cannot read from socket");
-  }
-
-  printf("[TCP] Received packet...\n");
-  printf("[TCP] Received : %d bytes...\n",bytes_recv);
-
-  /* Prende l'id ricevuto e lo inserisce in my_id */
-  IdPacket* deserialized_packet = (IdPacket*)Packet_deserialize(id_packet_buffer,bytes_recv);
-  *my_id = deserialized_packet->id;
-
-  printf("[TCP] Write ID correctly! new ID == %d\n", *my_id);
-  
-  /* Libera la memoria non più utilizzata */
-  Packet_free(&deserialized_packet->header);
-  Packet_free(&idpack->header);
-
-  /* PostTexture della texture del Vehicle */
-  PacketHeader im_head;
-  im_head.type = PostTexture;
-  im_head.size = 196647;
-
-  ImagePacket* image_packet = (ImagePacket*)malloc(sizeof(ImagePacket));
-  image_packet->image = *mytexture;
-  image_packet->header = im_head;
-  image_packet->id = *my_id;
-
-  printf("[TCP] Serializing packet...\n.. sending id : %d\n.. sending header : PostTexture\n", *my_id);
-
-
-  int image_packet_buffer_size = Packet_serialize(image_packet_buffer, &image_packet->header);
-
-  printf("[TCP] Packet serialized...\n");
-  printf("[TCP] Sending packet %d...\n", image_packet_buffer_size);
-
-  
-  /* Invia la texture */
-  while ( (ret = send(socket_desc, image_packet_buffer, image_packet_buffer_size, 0)) < 0) { //invio mytexture al server
-    if (errno == EINTR) continue;
-    ERROR_HELPER(-1, "Cannot write to socket");
-  }
-
-  printf("[TCP] packet id : %d\n.. sending header : PostTexture sent ...\n", *my_id);
-
-
-  printf("[TCP] Waiting for Server response...\n");
-
-  /* Riceve la texture della mappa */
-  while ( (bytes_recv = recv(socket_desc, id_packet_buffer, BUFFER_SIZE, 0)) < 0 ) { //aspetto ok dal server
-    if (errno == EINTR) continue;
-    ERROR_HELPER(-1, "Cannot read from socket");
-  }
-
-  printf("[TCP] Server Ready!...\n");
-
-  /* GetTexture della texture della mappa */
-
-  ImagePacket* Gettexture = (ImagePacket*)malloc(sizeof(ImagePacket));
-
-  PacketHeader texture_head;
-  texture_head.type = GetTexture;
-  Gettexture->header = texture_head;
-  Gettexture->id = *my_id;
-  Gettexture->image = NULL;
-
-
-  printf("[TCP] Serializing packet...\n.. sending id : %d\n.. sending header : GetTexture\n", Gettexture->id);
-
-
-  int texture_packet_buffer_size = Packet_serialize(Gettexture_packet_buffer, &Gettexture->header);
-
-  printf("[TCP] Packet serialized...\n");
-  printf("[TCP] Sending packet %d...\n", texture_packet_buffer_size);
-
-  /* Invia l'header della richiesta */
-  while ( (ret = send(socket_desc, Gettexture_packet_buffer, texture_packet_buffer_size, 0)) < 0 ) {
-    if (errno == EINTR) continue;
-    ERROR_HELPER(-1, "Cannot write to socket");
-  }
-
-  printf("[TCP] packet id : %d\n.. sending header : GetTexture sent ...\n", Gettexture->id);
-
-  printf("[TCP] Waiting for packet receiving...\n");
-
-  /* Riceve la texture della mappa */
-  while ( (bytes_recv = recv(socket_desc, Gettexture_packet_buffer, BUFFER_SIZE, 0)) < 0 ) {
-    if (errno == EINTR) continue;
-    ERROR_HELPER(-1, "Cannot read from socket");
-  }
-
-  printf("[TCP] Received packet...\n");
-  printf("[TCP] Received : %d bytes...\n",bytes_recv);
-
-  ImagePacket* texture_packet = (ImagePacket*)Packet_deserialize(Gettexture_packet_buffer,bytes_recv);
-  *map_elevation = texture_packet->image;
-
-  printf("[TCP] ELevation Map setted...\n");
-
-
-  // TODO
   pthread_exit(0); 
 }
 
@@ -399,15 +478,17 @@ int main(int argc, char **argv) {
   Image* map_elevation;
   Image* map_texture;
   Image* my_texture_from_server;
-  int ret;
+  int my_id;
+  int socket_desc;
 
   //init semaforo world_update
+  /*
    world_update_sem = malloc(sizeof(sem_t)); // we allocate a sem_t object on the heap
 
    ret = sem_init(world_update_sem, 0, 1);
    ERROR_HELPER(ret,"error creating semaphore");
-  
-  serverHandshake(&my_id,&my_texture,&map_elevation,&map_texture,&my_texture_from_server);
+    */
+  serverHandshake(&socket_desc, &my_id, &my_texture, &map_elevation, &map_texture, &my_texture_from_server);
 
   /*
   // construct the world
