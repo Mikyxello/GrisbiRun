@@ -21,116 +21,108 @@
 #include "user_list.h"
 #include "semaphore.h"
 
-#define TIME_TO_SLEEP   20000
-#define WORLDSIZE       4096
-#define SERVER_ADDRESS  "127.0.0.1"
-#define SERVER_PORT     25252
-#define UDPPORT         8888
-#define BUFFER_SIZE     1000000
+#define TIME_TO_SLEEP    20000
+#define WORLD_SIZE       1000
+#define SERVER_ADDRESS   "127.0.0.1"
+#define TCP_PORT         25252
+#define UDP_PORT         8888
+#define BUFFER_SIZE      1000000
 
 typedef struct localWorld{
-    int id_list[WORLDSIZE];
+    int id_list[WORLD_SIZE];
     int players_online;
     Vehicle** vehicles;
 } localWorld;
 
-typedef struct udpArgs{
+typedef struct {
     localWorld* lw;
     struct sockaddr_in server_addr;
-    int socket_udp;
-    int socket_tcp;
-}udpArgs;
+    int id;
+} udp_args_t;
 
 localWorld player_world;
 
-/* Original part */
 int window;
 WorldViewer viewer;
 World world;
-Vehicle* vehicle; // The vehicle
+Vehicle* vehicle;
 int socket_tcp;
+int socket_udp;
 
-/* End of original part */
-
-
-/*
 void* UDP_Sender(void* args){
     int ret;
-    udpArgs* udp_args = (udpArgs*) args;
+    char buffer[BUFFER_SIZE];
+
+    // Preparazione connessione
+    udp_args_t* udp_args = (udp_args_t*) args;
     struct sockaddr_in server_addr = udp_args->server_addr;
-    int socket_udp = udp_args->socket_udp;
-    int serverlen = sizeof(server_addr);   
-    while (server_connected){
-		  ret = send_updates(socket_udp,server_addr,serverlen);
-		  PTHREAD_ERROR_HELPER(ret,"error during send_updates");
-	  }
-    close(s);
-    return 0;
+    int sockaddr_len = sizeof(struct sockaddr_in);
+    int id = udp_args->id;
+
+    // Preparazione aggiornamento da inviare al server
+		Vehicle_update(vehicle, 1);
+    VehicleUpdatePacket* vehicle_packet = (VehicleUpdatePacket*) malloc(sizeof(VehicleUpdatePacket));
+
+    // Header pacchetto    
+    PacketHeader header;
+    header.type = VehicleUpdate;
+
+    // Contenuto del pacchetto
+    vehicle_packet->header = header;
+    vehicle_packet->id = id;
+    vehicle_packet->rotational_force = vehicle->rotational_force;
+    vehicle_packet->translational_force = vehicle->translational_force;
+
+    // Serializzazione del pacchetto
+    int buffer_size = Packet_serialize(buffer, &vehicle_packet->header);
+
+    // Invio il pacchetto
+    ret = sendto(socket_udp, buffer, buffer_size , 0, (struct sockaddr*) &server_addr, (socklen_t) sockaddr_len);
+    ERROR_HELPER(ret,"[UDP] Failed sending update to the server!!!");
+
+    pthread_exit(0);
 }
+
 
 void* UDP_Receiver(void* args){
-	udpArgs udp_args =(udpArgs*)args;
-	struct sockaddr_in server_addr=udp_args.server_addr;
-  int socket_udp =udp_args.socket_udp;
-  int serverlen=sizeof(server_addr);
-  int bytes_read;
-  char buf_rcv[BUFFER_SIZE];
+  int ret;
+  int buffer_size = 0;
+  char buffer[BUFFER_SIZE];
+
+	udp_args_t* udp_args = (udp_args_t*) args;
+	struct sockaddr_in server_addr = udp_args->server_addr;
+  socklen_t addrlen = sizeof(struct sockaddr_in);
+
   while (1){
-		bytes_read=recvfrom(socket_udp, buf_rcv, BUFFER_SIZE, 0, (struct sockaddr*) &server_addr, &addrlen);
-		PTHREAD_ERROR_HELPER(bytes_read,"error during recvfrom");
-		ret = packet_analisys(buf_rcv,bytes_read);
-		PTHREAD_ERROR_HELPER(bytes_read,"error during packet_analisys");
+    // Ricezione update
+		ret = recvfrom(socket_udp, buffer, BUFFER_SIZE, 0, (struct sockaddr*) &server_addr, &addrlen);
+		ERROR_HELPER(ret, "[ERROR] Cannot receive packet from server!!!");
+  
+    buffer_size += ret;
+
+    WorldUpdatePacket* wup = (WorldUpdatePacket*) Packet_deserialize(buffer, buffer_size);
+
+    // Aggiorna le posizioni dei veicoli
+    if(wup->header.type == WorldUpdate) {
+      ClientUpdate* client_update = wup->updates;
+      while(client_update!=NULL){
+        for(int i=0; i < WORLD_SIZE; i++) {
+          if (player_world.id_list[i] == client_update->id) {
+            Vehicle_setXYTheta(player_world.vehicles[i], wup->updates->x, wup->updates->y, wup->updates->theta);
+            break;
+          }
+        }
+      }
+    }
 	}
 }
 
-int packet_analisys(char* buffer, int len){
-	
-	World world_aux = world;
-	ret=sem_wait(world_update_sem);
-	PTHREAD_ERROR_HELPER(ret,"errore sulla sem_wait in world_updater");
-	int i,new_players=0;
-  WorldUpdatePacket* deserialized_wu_packet = (WorldUpdatePacket*)Packet_deserialize(world_buffer, world_buffer_size);
-	if(deserialized_wu_packet->header->type != WorldUpdate) return 0;
-	ClientUpdate* aux = deserialized_wu_packet->updates;
-	while(aux!=NULL){
-		for(int i=0;i<WORLDSIZE;i++){
-			if (player_world->id_list[i] == aux->id){
-				Vehicle_setXYTheta(player_world->vehicles[i],deserialized_wu_packet->updates->x,deserialized_wu_packet->updates->y,deserialized_wu_packet->updates->theta);
-				break;
-			}
-		new_players=1;
-		}
-	}
-	
-	if (deserialized_wu_packet->num_vehicles != player_world->players_online || new_players) check_newplayers(deserialized_wu_packet); //aggiunge eventuali nuovi giocatori
-	
-	
-	
-	
-	
-	
-}
-int sendUpdates(int socket_udp,struct sockaddr_in server_addr,int serverlen){
-		Vehicle_update(vehicle,1);
-		VehicleUpdatePacket* vehicle_packet = (VehicleUpdatePacket*)malloc(sizeof(VehicleUpdatePacket));
-		PacketHeader v_head;
-		v_head.type = VehicleUpdate;
-		vehicle_packet->header = v_head;
-		vehicle_packet->id = my_id;
-		vehicle_packet->rotational_force = vehicle->rotational_force;
-		vehicle_packet->translational_force = vehicle->translational_force;
-		char vehicle_buffer[BUFFER_SIZE];
-		int vehicle_buffer_size = Packet_serialize(vehicle_buffer, &vehicle_packet->header);
-		ret = sendto(s, vehicle_buffer, vehicle_buffer_size , 0 , (struct sockaddr *) &si_other, slen);
-		PTHREAD_ERROR_HELPER(ret,"UDP sendto failed");
-}
-*/
 
 /* World updater */
 void* world_updater(void* args){
 	while (1){
 		World_update(&world);
-		usleep(30000);
+		usleep(TIME_TO_SLEEP);
 	}
 	return 0;
 }
@@ -380,7 +372,7 @@ void serverHandshake (int* socket_desc, int* my_id, Image** my_texture, Image** 
 
   server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDRESS);
   server_addr.sin_family      = AF_INET;
-  server_addr.sin_port        = htons(SERVER_PORT);
+  server_addr.sin_port        = htons(TCP_PORT);
 
   // Si connette al server
   ret = connect(*socket_desc, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in)); 
@@ -428,6 +420,7 @@ int main(int argc, char **argv) {
   Image* map_elevation;
   Image* map_texture;
   Image* my_texture_from_server;
+  int ret;
 
   // Scambia messaggi TCP
   serverHandshake(&socket_tcp, &my_id, &my_texture, &map_elevation, &map_texture, &my_texture_from_server);
@@ -456,36 +449,50 @@ int main(int argc, char **argv) {
   // TODO: far partire il mondo attraverso la funzione WorldViewer_runGlobal
 
   pthread_t world_runner;
-  pthread_create(&world_runner, NULL, world_updater, NULL);
+  ret = pthread_create(&world_runner, NULL, world_updater, NULL);
+  PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot create world runner thread!!!");
   printf("[MAIN] World thread created...\n");
 
   WorldViewer_runGlobal(&world, vehicle, &argc, argv);
   printf("[MAIN] Run global...\n");
 
-  pthread_join(world_runner, NULL);
+  ret = pthread_join(world_runner, NULL);
+  ERROR_HELPER(ret, "[ERROR] Joining world runner failed!!!");
 
-  /*
-  uint16_t port_number_udp = htons((uint16_t)UDPPORT); // we use network byte order
+  // UDP
 	int socket_udp = socket(AF_INET, SOCK_DGRAM, 0);
-  ERROR_HELPER(socket_desc, "Can't create an UDP socket");
+  ERROR_HELPER(socket_udp, "[ERROR] Can't create an UDP socket!!!");
 
 	struct sockaddr_in udp_server = {0}; // some fields are required to be filled with 0
   udp_server.sin_addr.s_addr = INADDR_ANY;
   udp_server.sin_family      = AF_INET;
-  udp_server.sin_port        = port_number_udp;
+  udp_server.sin_port        = htons(UDP_PORT);
 
-  pthread_t UDP_sender,UDP_receiver;
-  udpArgs udp_args;
-  udp_args.socket_tcp=socket_desc;
-  udp_args.server_addr=udp_server;
-  udp_args.socket_udp=socket_udp;
-    
-  ret = pthread_create(&UDP_sender, NULL, UDP_sender, udp_args);
-  ERROR_HELPER(ret,"can't create UDP_Sender thread");
-    
-  ret = pthread_create(&UDP_receiver, NULL, UDP_Receiver, udp_args);
-  ERROR_HELPER(ret,"can't create UDP_Receiver thread");
-  */
+  pthread_t UDP_sender, UDP_receiver;
+
+  udp_args_t udp_args;
+  udp_args.server_addr = udp_server;
+  udp_args.id = my_id;
+  
+  printf("[MAIN] Creating threads...\n");
+
+  ret = pthread_create(&UDP_sender, NULL, UDP_Sender, &udp_args);
+  PTHREAD_ERROR_HELPER(ret, "[ERROR] Can't create UDP Sender thread!!!");
+   
+  ret = pthread_create(&UDP_receiver, NULL, UDP_Receiver, &udp_args);
+  ERROR_HELPER(ret, "[ERROR] Can't create UDP receiver thread!!!");
+
+  printf("[MAIN] Threads created...\n");
+  printf("[MAIN] Joining threads...\n");
+
+  ret = pthread_join(UDP_sender, NULL);
+  PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot join UDP sender thread!!!");
+
+  ret = pthread_join(UDP_receiver, NULL);
+  PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot join UDP receiver thread!!!");
+
+  printf("[MAIN] Thrads joined...\n");
+  printf("[MAIN] Closing...\n");
 
   // cleanup
   World_destroy(&world);

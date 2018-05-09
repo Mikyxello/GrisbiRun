@@ -284,6 +284,7 @@ void* TCP_handler(void* args){
   printf("[TCP] Handler started...\n");
 
   int ret;
+  int tcp_client_desc;
 
   tcp_args_t* tcp_args = (tcp_args_t*) args;	// Cast degli args da void a tcp_args_t
 
@@ -291,11 +292,9 @@ void* TCP_handler(void* args){
 
   int sockaddr_len = sizeof(struct sockaddr_in);
   struct sockaddr_in client_addr;
-  int tcp_client_desc = 0;
-  while(tcp_client_desc = accept(tcp_socket, (struct sockaddr*)&client_addr, (socklen_t*) &sockaddr_len)) {
-    ERROR_HELPER(tcp_client_desc, "[ERROR] Failed to accept client TCP connection!!!");
 
-    if (tcp_client_desc>=0) printf("[TCP] Connection enstablished with (%d)...\n", tcp_client_desc);
+  while( (tcp_client_desc = accept(tcp_socket, (struct sockaddr*)&client_addr, (socklen_t*) &sockaddr_len)) > 0) {
+    printf("[TCP] Connection enstablished with (%d)...\n", tcp_client_desc);
 
     pthread_t client_thread;
 
@@ -316,6 +315,8 @@ void* TCP_handler(void* args){
     ret=pthread_join(client_thread, NULL);
     ERROR_HELPER(ret,"[ERROR] Failed to join TCP client handling thread!!!");
   }
+  ERROR_HELPER(tcp_client_desc, "[ERROR] Failed to accept client TCP connection!!!");
+
 
   // Chiusura thread
   pthread_exit(0);
@@ -349,7 +350,6 @@ void* UDP_receiver_handler(void* args) {
   
   // Aggiorna la posizione dell'utente
   Vehicle_setForcesUpdate(user->vehicle, packet->translational_force, packet->rotational_force);
-  //Vehicle_setXYTheta(user->vehicle, packet->x, packet->y, packet->theta);
   
   // Update del mondo
   World_update(&world);
@@ -389,7 +389,6 @@ void* UDP_sender_handler(void* args) {
 
     client->id = user->id;
     Vehicle_getXYTheta(user->vehicle, &(client->x), &(client->y), &(client->theta));
-    // Vehicle_getForcesUpdate(user->vehicle, client->translational_force, client->rotational_force);
 
     user = user->next;
   }
@@ -483,7 +482,7 @@ int main(int argc, char **argv) {
   struct sockaddr_in udp_server_addr = {0};
   udp_server_addr.sin_addr.s_addr = INADDR_ANY;
   udp_server_addr.sin_family      = AF_INET;
-  udp_server_addr.sin_port        = htons((uint16_t) UDP_PORT);
+  udp_server_addr.sin_port        = htons(UDP_PORT);
 
   int reuseaddr_opt_udp = 1;
   ret = setsockopt(udp_socket, SOL_SOCKET, SO_REUSEADDR, &reuseaddr_opt_udp, sizeof(reuseaddr_opt_udp));
@@ -494,7 +493,7 @@ int main(int argc, char **argv) {
   ERROR_HELPER(ret, "[ERROR] Failed bind address on UDP server socket!!!");
   if(ret>=0) printf("[MAIN] Bind worked UDP...\n");
 
-  printf("[MAIN] [UDP] Server UDP started...\n");  // DEBUG OUTPUT
+  printf("[MAIN] Server UDP started...\n");  // DEBUG OUTPUT
 
   // Inizializzazione utenti
   users = (UserHead*) malloc(sizeof(UserHead));
@@ -508,7 +507,7 @@ int main(int argc, char **argv) {
   /* ------------------- */
   /* Gestione dei thread */
   /* ------------------- */
-  pthread_t TCP_connection, UDP_sender_thread, UDP_receiver_thread;
+  pthread_t TCP_connection, UDP_sender_thread, UDP_receiver_thread; // TODO: World updater
 
   // Args per il thread TCP
   tcp_args_t tcp_args;
