@@ -19,6 +19,6 @@ void WorldViewer_runGlobal(World* world,
 			   Vehicle* self,
 			   int* argc, char** argv);
 
-void WorldViewer_draw(WorldViewer* viewer);
-
-void WorldViewer_reshapeViewport(WorldViewer* viewer, int width, int height);
+void WorldViewer_init(WorldViewer* viewer,
+		      World* w,
+		      Vehicle* self);

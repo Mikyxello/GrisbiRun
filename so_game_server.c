@@ -72,7 +72,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Packet_free(&(id_to_send->header));   // Libera la memoria del pacchetto non più utilizzato
     free(id_to_send);
 
-    printf("[TCP] ID sent to %d (size = %d)...\n", id, bytes_sent);  // DEBUG OUTPUT
+    printf("[TCP] ID sent to %d...\n", id);  // DEBUG OUTPUT
 
     return 1;
   }
@@ -113,7 +113,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Packet_free(&(texture_to_send->header));   // Libera la memoria del pacchetto non più utilizzato
     free(texture_to_send);
 
-    printf("[TCP] Texture sent to %d (size = %d)...\n", id, bytes_sent);   // DEBUG OUTPUT
+    printf("[TCP] Texture sent to %d...\n", id);   // DEBUG OUTPUT
 
     return 1;
   }
@@ -154,17 +154,17 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Packet_free(&(elevation_to_send->header));   // Libera la memoria del pacchetto non più utilizzato
     free(elevation_to_send);
 
-    printf("[TCP] Elevation sent to %d (size = %d)...\n", id, bytes_sent);   // DEBUG OUTPUT
+    printf("[TCP] Elevation sent to %d...\n", id);   // DEBUG OUTPUT
 
     return 1;
   }
 
   // Se il server riceve una texture dal client
   else if (header->type == PostTexture) {
-    //int ret;
+    int ret;
  
     if (len < header->size) {
-      //printf("[TCP] Actual packet (size = %d)...\n", len);
+      // printf("[TCP] Received packet vehicle (size = %d)...\n", len);
       return -1;
     }
 
@@ -179,10 +179,30 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Vehicle_init(new_vehicle, &world, id, received_texture->image);
     World_addVehicle(&world, new_vehicle);
 
-   	Packet_free(received_header);	// Libera la memoria del pacchetto non più utilizzato
-    free(received_texture);
+    printf("[TCP] Vehicle loaded from %d...\n", id);
+    printf("[TCP] Sending back the vehicle texture...\n");
 
-    printf("[TCP] Vehicle loaded from %d...\n", id);   // DEBUG OUTPUT
+    // Rimanda la texture al client come conferma
+    PacketHeader header_aux;
+    header_aux.type = PostTexture;
+
+    ImagePacket* texture_for_client = (ImagePacket*)malloc(sizeof(ImagePacket));
+    texture_for_client->image = received_texture->image;
+    texture_for_client->header = header_aux;
+
+    // Serializza la texture da mandare
+    int buffer_size = Packet_serialize(buffer, &texture_for_client->header);
+    
+    // Invia la texture
+    while ( (ret = send(tcp_socket, buffer, buffer_size, 0)) < 0) {
+      if (errno == EINTR) continue;
+      ERROR_HELPER(ret, "[ERROR] Cannot write to socket!!!");
+    }
+
+    printf("[TCP] Vehicle texture sent back to %d...\n", id);
+
+    Packet_free(&received_texture->header); // Libera la memoria del pacchetto non più utilizzato
+    //Packet_free(&texture_for_client->header);
 
     return 1;
   }
@@ -209,7 +229,7 @@ void* TCP_client_handler (void* args){
   int ret;
   char buffer_recv[BUFFER_SIZE];	// Conterrà il PacketHeader
 
-  printf("[TCP] Creating user with id (%d)...\n", tcp_client_desc);
+  // printf("[TCP] Creating user with id (%d)...\n", tcp_client_desc);
 
   // Inserimento utente in lista
   User* user = (User*) malloc(sizeof(User));
@@ -221,7 +241,7 @@ void* TCP_client_handler (void* args){
   user->vehicle = NULL;
   User_insert_last(users, user);
 
-  printf("[TCP] User (%d) inserted...\n", tcp_client_desc);
+  // printf("[TCP] User (%d) inserted...\n", tcp_client_desc);
 
   // Ricezione del pacchetto
   int packet_length = BUFFER_SIZE;
@@ -237,7 +257,7 @@ void* TCP_client_handler (void* args){
 
     msg_length += ret;
 
-    printf("[TCP] Received packet (total size = %d)...\n", ((PacketHeader*) buffer_recv)->size);
+    // printf("[TCP] Received packet (total size = %d)...\n", ((PacketHeader*) buffer_recv)->size);
 
     // Gestione del pacchetto ricevuto tramite l'handler dei pacchetti
     ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture, msg_length);
@@ -245,16 +265,13 @@ void* TCP_client_handler (void* args){
     if (ret == 1) {
       printf("[TCP] Success...\n");
       msg_length = 0;
+      continue;
     }
     else {
       printf("[TCP] Next packet...\n");
+      continue;
     }
   }
-
-  // Chiusura socket
-  ret = close(tcp_client_desc);
-  if (ret) printf("[TCP] Socket closed with client (%d)...\n", tcp_client_desc);
-  else printf("[ERROR] Error closing socket with client!!!\n");
 
   // Chiusura thread
   pthread_exit(0);
@@ -273,6 +290,7 @@ void* TCP_handler(void* args){
   printf("[TCP] Accepting connection from clients...\n");
 
   while(1) {
+    printf("[TCP] Begin accepting a new connection...\n");
     int sockaddr_len = sizeof(struct sockaddr_in);
     struct sockaddr_in client_addr;
     int tcp_client_desc = accept(tcp_socket, (struct sockaddr*)&client_addr, (socklen_t*) &sockaddr_len);   // Accetta nuova connessione dal client
@@ -289,7 +307,7 @@ void* TCP_handler(void* args){
     tcp_args_aux.surface_elevation = tcp_args->surface_elevation;
     tcp_args_aux.client_addr = client_addr;
 
-    printf("[TCP] Creating client handling thread for %d...\n", tcp_args_aux.client_desc);
+    //printf("[TCP] Creating client handling thread for %d...\n", tcp_args_aux.client_desc);
 
     // Thread create
     ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
@@ -301,12 +319,6 @@ void* TCP_handler(void* args){
 
     printf("[TCP] Thread joined...\n");
   }
-
-  // Chiusura socket e libera memoria 
-  ret = close(tcp_socket);
-  if (ret) printf("[TCP] Socket closed...\n");
-  else printf("[ERROR] Error closing socket!!!\n");
-  //free(tcp_args);
 
   // Chiusura thread
   pthread_exit(0);
@@ -490,11 +502,11 @@ int main(int argc, char **argv) {
   /* Inizializzazione utenti */
   users = (UserHead*) malloc(sizeof(UserHead));
   Users_init(users);
-  printf("[MAIN] User list initialized...\n");
+  // printf("[MAIN] User list initialized...\n");
 
   /* Inizializzazione del mondo */
   World_init(&world, surface_elevation, surface_texture,  0.5, 0.5, 0.5);
-  printf("[MAIN] World initialized...\n");
+  // printf("[MAIN] World initialized...\n");
 
   /* ------------------- */
   /* Gestione dei thread */
@@ -518,7 +530,7 @@ int main(int argc, char **argv) {
   ret = pthread_create(&UDP_receiver_thread, NULL, UDP_receiver_handler, NULL); 
   PTHREAD_ERROR_HELPER(ret, "[ERROR] [MAIN] Failed to create UDP receiver thread!!!");
 
-  printf("[MAIN] Threads created...\n");
+  // printf("[MAIN] Threads created...\n");
   printf("[MAIN] Joining threads...\n");
 
   /* Join dei thread */
@@ -531,7 +543,7 @@ int main(int argc, char **argv) {
   ret=pthread_join(UDP_receiver_thread,NULL);
   ERROR_HELPER(ret,"[ERROR] [MAIN] Failed to join UDP server receiver thread!!!");
 
-  printf("[MAIN] Threads joined...\n");
+  // printf("[MAIN] Threads joined...\n");
   printf("[MAIN] Closing...\n");
 
   /* Cleanup generale per liberare la memoria utilizzata */
