@@ -39,7 +39,7 @@ User* User_insert_last(UserHead* head, User* user) {
     return user;
   }
 
-  if(aux->next != NULL) {
+  while(aux->next != NULL) {
     aux = aux->next;
   }
 
@@ -47,4 +47,24 @@ User* User_insert_last(UserHead* head, User* user) {
   head->size++;
 
   return user;
+}
+
+int User_remove_id(UserHead* head, int id) {
+  if (head == NULL) return 0;
+
+  if (head->first->id == id) {
+    head->first = NULL;
+    head->size = 0;
+    return 1;
+  }
+
+  User* user = head->first;
+
+  while (user->next != NULL && user->next->id == id) {
+    user->next = user->next->next;
+    head->size = head->size - 1;
+    return 1;
+  }
+
+  return 0;
 }

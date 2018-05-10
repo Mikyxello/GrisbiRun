@@ -21,7 +21,7 @@
 #include "user_list.h"
 #include "semaphore.h"
 
-#define TIME_TO_SLEEP    20000
+#define TIME_TO_SLEEP    5000000
 #define WORLD_SIZE       1000
 #define SERVER_ADDRESS   "127.0.0.1"
 #define TCP_PORT         25252
@@ -38,7 +38,13 @@ typedef struct {
     localWorld* lw;
     struct sockaddr_in server_addr;
     int id;
+    int udp_socket;
 } udp_args_t;
+
+typedef struct {
+  volatile int run;
+  World* world;
+} UpdaterArgs;
 
 localWorld player_world;
 
@@ -46,21 +52,27 @@ int window;
 WorldViewer viewer;
 World world;
 Vehicle* vehicle;
-int socket_tcp;
-int socket_udp;
 
+/* Invia ogni tot millisecondi l'aggiornamento del proprio veicolo al server in UDP -- TODO: Temporizzare l'invio di messaggi */
 void* UDP_Sender(void* args){
-    int ret;
-    char buffer[BUFFER_SIZE];
+  int ret;
+  char buffer[BUFFER_SIZE];
 
-    // Preparazione connessione
-    udp_args_t* udp_args = (udp_args_t*) args;
-    struct sockaddr_in server_addr = udp_args->server_addr;
-    int sockaddr_len = sizeof(struct sockaddr_in);
-    int id = udp_args->id;
+  printf("[UDP SENDER] Sender thread started...\n");
 
+  // Preparazione connessione
+  udp_args_t* udp_args = (udp_args_t*) args;
+  int udp_socket = udp_args->udp_socket;
+  int id = udp_args->id;
+
+  struct sockaddr_in server_addr = udp_args->server_addr;
+  int sockaddr_len = sizeof(struct sockaddr_in);
+
+  //printf("[UDP SENDER] Ready to send updates...\n");
+  while(1) {
     // Preparazione aggiornamento da inviare al server
-		Vehicle_update(vehicle, 1);
+    //printf("[UDP SENDER] Sending new update...\n");
+  	Vehicle_update(vehicle, 1);
     VehicleUpdatePacket* vehicle_packet = (VehicleUpdatePacket*) malloc(sizeof(VehicleUpdatePacket));
 
     // Header pacchetto    
@@ -70,72 +82,108 @@ void* UDP_Sender(void* args){
     // Contenuto del pacchetto
     vehicle_packet->header = header;
     vehicle_packet->id = id;
-    vehicle_packet->rotational_force = vehicle->rotational_force;
-    vehicle_packet->translational_force = vehicle->translational_force;
+
+    Vehicle* vehicle_aux = World_getVehicle(&world, id);
+
+    vehicle_packet->rotational_force = vehicle_aux->rotational_force;
+    vehicle_packet->translational_force = vehicle_aux->translational_force;
+
+    
+    printf("X: %f, Y: %f, THETA: %f, ROTATIONAL: %f, TRANSLATIONAL: %f\n", 
+      vehicle_aux->x,
+      vehicle_aux->y,
+      vehicle_aux->theta,
+      vehicle_aux->rotational_force,
+      vehicle_aux->translational_force);
 
     // Serializzazione del pacchetto
     int buffer_size = Packet_serialize(buffer, &vehicle_packet->header);
 
-    // Invio il pacchetto
-    ret = sendto(socket_udp, buffer, buffer_size , 0, (struct sockaddr*) &server_addr, (socklen_t) sockaddr_len);
-    ERROR_HELPER(ret,"[UDP] Failed sending update to the server!!!");
+    //printf("[UDP SENDER] Sending packet (%d)...\n", buffer_size);
 
-    pthread_exit(0);
+    // Invio il pacchetto
+    ret = sendto(udp_socket, buffer, buffer_size , 0, (struct sockaddr*) &server_addr, (socklen_t) sockaddr_len);
+    ERROR_HELPER(ret,"[ERROR] Failed sending update to the server!!!");
+
+    //printf("[UPD SENDER] Update sent...\n");
+
+    usleep(TIME_TO_SLEEP);
+  }
+
+  printf("[UDP SENDER] Closed sender...\n");
+
+  pthread_exit(0);
 }
 
-
+/* Riceve gli update del mondo dal server e li carica nel proprio mondo */
 void* UDP_Receiver(void* args){
   int ret;
   int buffer_size = 0;
   char buffer[BUFFER_SIZE];
 
+  printf("[UDP RECEIVER] Receiving updates...\n");
+
+  // Preparazione connessione
 	udp_args_t* udp_args = (udp_args_t*) args;
+  int udp_socket = udp_args->udp_socket;
+
 	struct sockaddr_in server_addr = udp_args->server_addr;
   socklen_t addrlen = sizeof(struct sockaddr_in);
 
-  while (1){
-    // Ricezione update
-		ret = recvfrom(socket_udp, buffer, BUFFER_SIZE, 0, (struct sockaddr*) &server_addr, &addrlen);
+  // printf("[UDP RECEIVER] Ready to receive packets from server...\n");
+  // Ricezione update
+  while ( (ret = recvfrom(udp_socket, buffer, BUFFER_SIZE, 0, (struct sockaddr*) &server_addr, &addrlen)) > 0){   
 		ERROR_HELPER(ret, "[ERROR] Cannot receive packet from server!!!");
   
+    // printf("[UDP RECEIVER] Received update...\n");
+
     buffer_size += ret;
 
-    WorldUpdatePacket* wup = (WorldUpdatePacket*) Packet_deserialize(buffer, buffer_size);
+    WorldUpdatePacket* world_update = (WorldUpdatePacket*) Packet_deserialize(buffer, buffer_size);
+    // printf("[UDP RECEIVER] Loaded update...\n");
 
     // Aggiorna le posizioni dei veicoli
-    if(wup->header.type == WorldUpdate) {
-      ClientUpdate* client_update = wup->updates;
-      while(client_update!=NULL){
-        for(int i=0; i < WORLD_SIZE; i++) {
-          if (player_world.id_list[i] == client_update->id) {
-            Vehicle_setXYTheta(player_world.vehicles[i], wup->updates->x, wup->updates->y, wup->updates->theta);
-            break;
-          }
-        }
-      }
+
+    for(int i=0; i < world_update->num_vehicles; i++) {
+      ClientUpdate* client = &(world_update->updates[i]);
+
+      Vehicle* client_vehicle = World_getVehicle(&world, client->id);
+
+      client_vehicle->x = client->x;
+      client_vehicle->y = client->y;
+      client_vehicle->theta = client->theta;
     }
-	}
+
+  }
+
+  printf("[UDP RECEIVER] Closed receiver...\n");
+  pthread_exit(0);
 }
 
-
-/* World updater */
-void* world_updater(void* args){
-	while (1){
-		World_update(&world);
-		usleep(TIME_TO_SLEEP);
-	}
-	return 0;
+// this is the updater threas that takes care of refreshing the agent position
+// in your client it is not needed, but you will
+// have to copy the x,y,theta fields from the world update packet
+// to the vehicles having the corrsponding id
+void* updater_thread(void* args_){
+  UpdaterArgs* args=(UpdaterArgs*)args_;
+  while(args->run){
+    World_update(args->world);
+    usleep(TIME_TO_SLEEP);
+  }
+  return 0;
 }
 
 
  /* ----------------- */
  /* GetId dell'utente */
  /* ----------------- */
-void recv_ID(int* my_id, int socket_desc) {
+void recv_ID(int* my_id, int tcp_socket) {
   int ret;
   char buffer[BUFFER_SIZE];
 
   printf("[TCP] Requesting ID...\n");
+  
+  // Preparazione pacchetto da inviare 
   PacketHeader header;
   header.type = GetId;
   
@@ -146,44 +194,39 @@ void recv_ID(int* my_id, int socket_desc) {
   int buffer_size = Packet_serialize(buffer, &packet->header);
 
   // Invia la richiesta
-  while ( (ret = send(socket_desc, buffer, buffer_size, 0)) < 0 ) {
+  while ( (ret = send(tcp_socket, buffer, buffer_size, 0)) < 0 ) {
     if (errno == EINTR) continue;
     ERROR_HELPER(-1, "[ERROR] Cannot write to socket!!!");
   }
 
-  printf("[TCP] ID request sent...\n");
+  // printf("[TCP] ID request sent...\n");
   // printf("[TCP] Waiting for ID receiving...\n");
 
   // Riceve l'id
-  while ( (buffer_size = recv(socket_desc, buffer, BUFFER_SIZE, 0)) < 0 ) { //ricevo ID dal server
+  while ( (buffer_size = recv(tcp_socket, buffer, BUFFER_SIZE, 0)) < 0 ) { //ricevo ID dal server
     if (errno == EINTR) continue;
     ERROR_HELPER(-1, "[ERROR] Cannot read from socket!!!");
   }
 
-  printf("[TCP] ID received...\n");
+  // printf("[TCP] ID received...\n");
 
   // Prende l'id ricevuto e lo inserisce in my_id
   IdPacket* id_recv = (IdPacket*) Packet_deserialize(buffer,buffer_size);
   *my_id = id_recv->id;
 
-  printf("[TCP] ID loaded: %d...\n", *my_id);
-  
-  // Libera la memoria non più utilizzata 
-  //Packet_free(&id_recv->header);
-  //Packet_free(&packet->header);
-  //free(id_recv);
-  //free(packet);
+  printf("[TCP] ID received: %d...\n", *my_id);
 }
-
 
 /* ------------------------------------ */
 /* GetTexture della texture della mappa */
 /* ------------------------------------ */
-void recv_Texture(Image** map_texture, int socket_desc) {
+void recv_Texture(Image** map_texture, int tcp_socket) {
   int ret;
   char buffer[BUFFER_SIZE];
 
-  printf("[TCP] Requesting texture...\n");
+  printf("[TCP] Requesting map texture...\n");
+
+  // Preparazione pacchetto da inviare
   PacketHeader header;
   header.type = GetTexture;
 
@@ -194,31 +237,32 @@ void recv_Texture(Image** map_texture, int socket_desc) {
   int buffer_size = Packet_serialize(buffer, &packet->header);
 
   // Invia la richiesta
-  while ( (ret = send(socket_desc, buffer, buffer_size, 0)) < 0 ) {
+  while ( (ret = send(tcp_socket, buffer, buffer_size, 0)) < 0 ) {
     if (errno == EINTR) continue;
     ERROR_HELPER(-1, "[ERROR] Cannot write to socket!!!");
   }
 
-  printf("[TCP] Texture request sent...\n");
-  // printf("[TCP] Waiting for texture receiving...\n");
+  //printf("[TCP] Map texture request sent...\n");
+  //printf("[TCP] Waiting for texture receiving...\n");
 
   int actual_size = 0;
   buffer_size = 0;
+
+  // Riceve la texture della mappa
   while(1) {
-    // Riceve la texture della mappa
-    while ( (buffer_size += recv(socket_desc, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
+    while ( (buffer_size += recv(tcp_socket, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
       if (errno == EINTR) continue;
       ERROR_HELPER(-1, "[ERROR] Cannot read from socket!!!");
     }
 
-    printf("[TCP] Texture received...\n");
+    //printf("[TCP] Map texture received...\n");
 
     // Dimensione totale del pacchetto da ricevere
     actual_size = ((PacketHeader*) buffer)->size;
 
     // Se la dimensione del pacchetto ricevuto è ancora minore della dimensione del pacchetto totale aspetta le altre parti
     if (buffer_size < actual_size) {
-      printf("[TCP] Next packet...\n");
+      // printf("[TCP] Next packet...\n");
       continue;
     }
     else break;
@@ -228,23 +272,17 @@ void recv_Texture(Image** map_texture, int socket_desc) {
   ImagePacket* texture_recv = (ImagePacket*) Packet_deserialize(buffer, buffer_size);
   *map_texture = texture_recv->image;
 
-  printf("[TCP] Texture loaded...\n");
-
-  //Packet_free(&packet->header);
-  //Packet_free(&texture_recv->header);
-  //free(texture_recv);
-  //free(packet);
+  printf("[TCP] Map texture loaded...\n");
 }
-
 
 /* -------------------------------------- */
 /* GetElevation della texture della mappa */
 /* -------------------------------------- */
-void recv_Elevation(Image** map_elevation, int socket_desc) {
+void recv_Elevation(Image** map_elevation, int tcp_socket) {
   int ret;
   char buffer[BUFFER_SIZE];
 
-  printf("[TCP] Requesting elevation...\n");
+  printf("[TCP] Requesting map elevation...\n");
   PacketHeader header;
   header.type = GetElevation;
 
@@ -256,31 +294,31 @@ void recv_Elevation(Image** map_elevation, int socket_desc) {
   int buffer_size = Packet_serialize(buffer, &packet->header);
 
   // Invia la richiesta
-  while ( (ret = send(socket_desc, buffer, buffer_size, 0)) < 0 ) {
+  while ( (ret = send(tcp_socket, buffer, buffer_size, 0)) < 0 ) {
     if (errno == EINTR) continue;
     ERROR_HELPER(-1, "[ERROR] Cannot write to socket!!!");
   }
 
-  printf("[TCP] Elevation request sent...\n");
-  // printf("[TCP] Waiting for elevation receiving...\n");
+  //printf("[TCP] Elevation request sent...\n");
+  //printf("[TCP] Waiting for elevation receiving...\n");
 
   int actual_size = 0;
   buffer_size = 0;
   while(1) {
     // Riceve la elevation della mappa
-    while ( (buffer_size += recv(socket_desc, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
+    while ( (buffer_size += recv(tcp_socket, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
       if (errno == EINTR) continue;
       ERROR_HELPER(-1, "[ERROR] Cannot read from socket!!!");
     }
 
-    printf("[TCP] Elevation received...\n");
+    //printf("[TCP] Elevation received...\n");
 
     // Dimensione totale del pacchetto da ricevere
     actual_size = ((PacketHeader*) buffer)->size;
 
     // Se la dimensione del pacchetto ricevuto è ancora minore della dimensione del pacchetto totale aspetta le altre parti
     if (buffer_size < actual_size) {
-      printf("[TCP] Next packet...\n");
+      //printf("[TCP] Next packet...\n");
       continue;
     }
     else break;
@@ -290,22 +328,19 @@ void recv_Elevation(Image** map_elevation, int socket_desc) {
   ImagePacket* elevation_packet = (ImagePacket*) Packet_deserialize(buffer, buffer_size);
   *map_elevation = elevation_packet->image;
 
-  printf("[TCP] Elevation loaded...\n");
-
-  //Packet_free(&packet->header);
-  //Packet_free(&elevation_packet->header);
-  //free(elevation_packet);
-  //free(packet);
+  printf("[TCP] Map elevation loaded...\n");
 }
 
 /* ------------------------------------- */
 /* PostTexture della texture del veicolo */
 /* ------------------------------------- */
-void send_Texture(Image** my_texture, Image** my_texture_from_server, int socket_desc) {
+void send_Texture(Image** my_texture, Image** my_texture_from_server, int tcp_socket) {
   int ret;
   char buffer[BUFFER_SIZE];
 
   printf("[TCP] Sending texture to server...\n");
+
+  // Preparazione del pacchetto da inviare
   PacketHeader header;
   header.type = PostTexture;
 
@@ -315,20 +350,21 @@ void send_Texture(Image** my_texture, Image** my_texture_from_server, int socket
 
   int buffer_size = Packet_serialize(buffer, &packet->header);
   
-  // Invia la texture
-  while ( (ret = send(socket_desc, buffer, buffer_size, 0)) < 0) {
+  // Invia la texture del veicolo
+  while ( (ret = send(tcp_socket, buffer, buffer_size, 0)) < 0) {
     if (errno == EINTR) continue;
     ERROR_HELPER(ret, "[ERROR] Cannot write to socket!!!");
   }
 
-  printf("[TCP] Vehicle texture sent...\n");
-  // printf("[TCP] Waiting for texture receiving back...\n");
+  //printf("[TCP] Vehicle texture sent...\n");
+  //printf("[TCP] Waiting for texture receiving back...\n");
 
+
+  // Riceve la texture indietro
   int actual_size = 0;
   buffer_size = 0;
   while(1) {
-    // Riceve la texture indietro
-    while ( (buffer_size += recv(socket_desc, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
+    while ( (buffer_size += recv(tcp_socket, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
       if (errno == EINTR) continue;
       ERROR_HELPER(-1, "[ERROR] Cannot read from socket!!!");
     }
@@ -338,11 +374,11 @@ void send_Texture(Image** my_texture, Image** my_texture_from_server, int socket
 
     // Se la dimensione del pacchetto ricevuto è ancora minore della dimensione del pacchetto totale aspetta le altre parti
     if (buffer_size < actual_size) {
-      printf("[TCP] Next packet...\n");
+      //printf("[TCP] Next packet...\n");
       continue;
     }
     else {
-      // printf("[TCP] Vehicle texture received back...\n");
+      //printf("[TCP] Received texture back from server...\n");
       break;
     }
   }
@@ -351,44 +387,21 @@ void send_Texture(Image** my_texture, Image** my_texture_from_server, int socket
   ImagePacket* texture_back = (ImagePacket*) Packet_deserialize(buffer, buffer_size);
   *my_texture_from_server = texture_back->image;
 
-  printf("[TCP] Received texture back from server...\n");
-
-  // Libera la memoria non più utilizzata
-  //Packet_free(&packet->header);
-  //free(packet);
+  printf("[TCP] Vehicle texture loaded...\n");
 }
 
 
-void serverHandshake (int* socket_desc, int* my_id, Image** my_texture, Image** map_elevation,Image** map_texture, Image** my_texture_from_server){
-  int ret;
+void serverHandshake (int tcp_socket, int* my_id, Image** my_texture, Image** map_elevation,Image** map_texture, Image** my_texture_from_server){
+  //int ret;
   printf("[TCP] Handsaking started...\n");
 
-  // Apre la socket
-  struct sockaddr_in server_addr = {0};
-  *socket_desc = socket(AF_INET, SOCK_STREAM, 0);
-  ERROR_HELPER(*socket_desc, "[ERROR] Could not create socket!!!");
-  if (*socket_desc >= 0) 
-    printf("[TCP] Socket opened %d...\n", *socket_desc);
+  // Esegue le 4 operazioni per ottenere id, texture e elevation e inviare la propria texture
+  recv_ID(my_id, tcp_socket);
+  recv_Texture(map_texture, tcp_socket);
+  recv_Elevation(map_elevation, tcp_socket);
+  send_Texture(my_texture, my_texture_from_server, tcp_socket);
 
-  server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDRESS);
-  server_addr.sin_family      = AF_INET;
-  server_addr.sin_port        = htons(TCP_PORT);
-
-  // Si connette al server
-  ret = connect(*socket_desc, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in)); 
-  ERROR_HELPER(ret, "[ERROR] Could not create connection!!!");  
-  if (ret >= 0) printf("[TCP] Connection enstablished...\n");
-
-  // Esegue i 4 scambi in TCP
-  recv_ID(my_id, *socket_desc);
-  recv_Texture(map_texture, *socket_desc);
-  recv_Elevation(map_elevation, *socket_desc);
-  send_Texture(my_texture, my_texture_from_server, *socket_desc);
-  
-  // TODO: Chiudere connessione in TCP col server e aprirne una UDP per le update
-  ret = close(*socket_desc);
-  if (ret) printf("[TCP] Socket closed...\n");
-  else printf("[ERROR] Cannot close socket!!!\n");
+  printf("[TCP] Handshake ended...\n");
 
   return;
 }
@@ -421,22 +434,50 @@ int main(int argc, char **argv) {
   Image* map_texture;
   Image* my_texture_from_server;
   int ret;
+  int udp_socket;
+  int tcp_socket;
+
+  // Apertura connessione TCP
+  struct sockaddr_in server_addr = {0};
+
+  tcp_socket = socket(AF_INET, SOCK_STREAM, 0);
+  ERROR_HELPER(tcp_socket, "[ERROR] Could not create socket!!!");
+  //printf("[MAIN] Socket TCP opened %d...\n", tcp_socket);
+
+  server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDRESS);
+  server_addr.sin_family      = AF_INET;
+  server_addr.sin_port        = htons(TCP_PORT);
+
+  ret = connect(tcp_socket, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in)); 
+  ERROR_HELPER(ret, "[ERROR] Could not create connection!!!"); 
+  printf("[MAIN] Connection enstablished with server...\n");
+
+  // Apertura connessione UDP
+  udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+  ERROR_HELPER(udp_socket, "[ERROR] Can't create an UDP socket!!!");
+  //printf("[MAIN] Socket UDP opened...\n");
+
+  struct sockaddr_in udp_server = {0}; // some fields are required to be filled with 0
+  udp_server.sin_addr.s_addr = inet_addr(SERVER_ADDRESS);
+  udp_server.sin_family      = AF_INET;
+  udp_server.sin_port        = htons(UDP_PORT);
+
 
   // Scambia messaggi TCP
-  serverHandshake(&socket_tcp, &my_id, &my_texture, &map_elevation, &map_texture, &my_texture_from_server);
+  serverHandshake(tcp_socket, &my_id, &my_texture, &map_elevation, &map_texture, &my_texture_from_server);
 
-   // construct the world
-  printf("[MAIN] Initializating world and vehicle (ID = %d)...\n", my_id);
+  // construct the world
+  //printf("[MAIN] Initializating world and vehicle (ID = %d)...\n", my_id);
 
   World_init(&world, map_elevation, map_texture, 0.5, 0.5, 0.5);
-  printf("[MAIN] World initialized...\n");
+  //printf("[MAIN] World initialized...\n");
 
   vehicle=(Vehicle*) malloc(sizeof(Vehicle));
   Vehicle_init(vehicle, &world, my_id, my_texture_from_server);
-  printf("[MAIN] Vehicle initialized...\n");
+  //printf("[MAIN] Vehicle initialized...\n");
 
   World_addVehicle(&world, vehicle);
-  printf("[MAIN] Vehicle added...\n");
+  //printf("[MAIN] Vehicle added...\n");
   
   // spawn a thread that will listen the update messages from
   // the server, and sends back the controls
@@ -445,45 +486,41 @@ int main(int argc, char **argv) {
   // when the server notifies a new player has joined the game
   // request the texture and add the player to the pool
   /*FILLME*/
-
-  // TODO: far partire il mondo attraverso la funzione WorldViewer_runGlobal
-
-  pthread_t world_runner;
-  ret = pthread_create(&world_runner, NULL, world_updater, NULL);
-  PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot create world runner thread!!!");
-  printf("[MAIN] World thread created...\n");
-
-  WorldViewer_runGlobal(&world, vehicle, &argc, argv);
-  printf("[MAIN] Run global...\n");
-
-  ret = pthread_join(world_runner, NULL);
-  ERROR_HELPER(ret, "[ERROR] Joining world runner failed!!!");
-
-  // UDP
-	int socket_udp = socket(AF_INET, SOCK_DGRAM, 0);
-  ERROR_HELPER(socket_udp, "[ERROR] Can't create an UDP socket!!!");
-
-	struct sockaddr_in udp_server = {0}; // some fields are required to be filled with 0
-  udp_server.sin_addr.s_addr = INADDR_ANY;
-  udp_server.sin_family      = AF_INET;
-  udp_server.sin_port        = htons(UDP_PORT);
-
-  pthread_t UDP_sender, UDP_receiver;
+  
+  pthread_t UDP_sender, UDP_receiver, runner_thread;
 
   udp_args_t udp_args;
   udp_args.server_addr = udp_server;
   udp_args.id = my_id;
+  udp_args.udp_socket = udp_socket;
+
+  pthread_attr_t runner_attrs;
+  UpdaterArgs runner_args={
+    .run=1,
+    .world=&world
+  };
   
-  printf("[MAIN] Creating threads...\n");
+  pthread_attr_init(&runner_attrs);
+  runner_args.run=0;
+  void* retval;
+  
+  
+  //printf("[MAIN] Creating threads...\n");
 
   ret = pthread_create(&UDP_sender, NULL, UDP_Sender, &udp_args);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Can't create UDP Sender thread!!!");
-   
-  ret = pthread_create(&UDP_receiver, NULL, UDP_Receiver, &udp_args);
-  ERROR_HELPER(ret, "[ERROR] Can't create UDP receiver thread!!!");
 
-  printf("[MAIN] Threads created...\n");
-  printf("[MAIN] Joining threads...\n");
+  ret = pthread_create(&UDP_receiver, NULL, UDP_Receiver, &udp_args);
+  PTHREAD_ERROR_HELPER(ret, "[ERROR] Can't create UDP receiver thread!!!");
+
+  ret = pthread_create(&runner_thread, &runner_attrs, updater_thread, &runner_args);
+  PTHREAD_ERROR_HELPER(ret, "[ERROR] Can't create runner thread!!!");
+
+  //printf("[MAIN] Threads created...\n");
+
+  WorldViewer_runGlobal(&world, vehicle, &argc, argv);
+
+  //printf("[MAIN] Joining threads...\n");
 
   ret = pthread_join(UDP_sender, NULL);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot join UDP sender thread!!!");
@@ -491,8 +528,11 @@ int main(int argc, char **argv) {
   ret = pthread_join(UDP_receiver, NULL);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot join UDP receiver thread!!!");
 
-  printf("[MAIN] Thrads joined...\n");
-  printf("[MAIN] Closing...\n");
+  ret = pthread_join(runner_thread, &retval);
+  PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot run world!!!\n");
+
+  //printf("[MAIN] Thrads joined...\n");
+  //printf("[MAIN] Closing...\n");
 
   // cleanup
   World_destroy(&world);

@@ -23,6 +23,7 @@
 #define TCP_PORT        25252         // Porta per la connessione TCP
 #define UDP_PORT        8888          // Porta per la connessione UDP
 #define SERVER_ADDRESS  "127.0.0.1"   // Indirizzo del server (localhost)
+#define TIME_TO_SLEEP   1000000         // Imposta timeout di aggiornamento
 
 // Struttura per args dei threads in TCP
 typedef struct {
@@ -30,10 +31,15 @@ typedef struct {
 	struct sockaddr_in client_addr;
 	Image* elevation_texture;
 	Image* surface_elevation;
+  int tcp_socket;
 } tcp_args_t;
 
+typedef struct {
+  int udp_socket;
+} udp_args_t;
+
 // Definizione Socket e variabili 'globali'
-int tcp_socket, udp_socket;
+// int tcp_socket, udp_socket;
 World world;
 UserHead* users; 	// Inizio lista utenti per ricerca
 
@@ -179,8 +185,8 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Vehicle_init(new_vehicle, &world, id, received_texture->image);
     World_addVehicle(&world, new_vehicle);
 
-    printf("[TCP] Vehicle loaded from (%d)...\n", id);
-    printf("[TCP] Sending back the vehicle texture to (%d)...\n", id);
+    // printf("[TCP] Vehicle loaded from (%d)...\n", id);
+    // printf("[TCP] Sending back the vehicle texture to (%d)...\n", id);
 
     // Rimanda la texture al client come conferma
     PacketHeader header_aux;
@@ -210,13 +216,10 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
   // Nel caso il pacchetto sia sconosciuto
   else {
     printf("[ERROR] Unknown packet received from %d!!!\n", id);   // DEBUG OUTPUT
-
   }
 
   return -1;  // Return in caso di errore
 }
-
-
 
 /* Gestione del thread del client per aggiunta del client alla lista e controllo pacchetti tramite TCP_packet */
 void* TCP_client_handler (void* args){
@@ -252,6 +255,7 @@ void* TCP_client_handler (void* args){
     }
     if (ret == 0) {
       printf("[TCP] Connection closed with (%d)...\n", user->id);
+      if(User_remove_id(users, user->id) == 1) printf("[TCP] User (%d) removed...\n", user->id);
       break;
     }
 
@@ -263,12 +267,12 @@ void* TCP_client_handler (void* args){
     ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture, msg_length);
 
     if (ret == 1) {
-      printf("[TCP] Success...\n");
+      // printf("[TCP] Success...\n");
       msg_length = 0;
       continue;
     }
     else {
-      printf("[TCP] Next packet...\n");
+      // printf("[TCP] Next packet...\n");
       continue;
     }
   }
@@ -277,16 +281,15 @@ void* TCP_client_handler (void* args){
   pthread_exit(0);
 }
 
-
-
 /* Handler della connessione TCP con il client (nel thread) */
 void* TCP_handler(void* args){
-  printf("[TCP] Handler started...\n");
+  // printf("[TCP] Handler started...\n");
 
   int ret;
   int tcp_client_desc;
 
   tcp_args_t* tcp_args = (tcp_args_t*) args;	// Cast degli args da void a tcp_args_t
+  int tcp_socket = tcp_args->tcp_socket;
 
   printf("[TCP] Accepting connection from clients...\n");
 
@@ -305,15 +308,17 @@ void* TCP_handler(void* args){
     tcp_args_aux.surface_elevation = tcp_args->surface_elevation;
     tcp_args_aux.client_addr = client_addr;
 
-    printf("[TCP] Creating client handling thread for %d...\n", tcp_args_aux.client_desc);
+    // printf("[TCP] Creating client handling thread for %d...\n", tcp_args_aux.client_desc);
 
     // Thread create
     ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
     PTHREAD_ERROR_HELPER(ret, "[ERROR] Failed to create TCP client thread!!!");
 
+    /* 
     // Thread join
     ret=pthread_join(client_thread, NULL);
     ERROR_HELPER(ret,"[ERROR] Failed to join TCP client handling thread!!!");
+    */
   }
   ERROR_HELPER(tcp_client_desc, "[ERROR] Failed to accept client TCP connection!!!");
 
@@ -326,83 +331,116 @@ void* TCP_handler(void* args){
 
 /* Handler della connessione UDP con il client in modalità 'receiver' (riceve pacchetti) */
 void* UDP_receiver_handler(void* args) {
-  printf("[UDP RECEIVER] Handler started...\n");
+  //printf("[UDP RECEIVER] Handler started...\n");
 
   int ret;
-
+  udp_args_t* udp_args = (udp_args_t*) args;
+  int udp_socket = udp_args->udp_socket;
   char buffer_recv[BUFFER_SIZE];
+  
   struct sockaddr_in client_addr = {0};
   socklen_t addrlen = sizeof(struct sockaddr_in);
   
-  ret = recvfrom(udp_socket, buffer_recv, BUFFER_SIZE, 0, (struct sockaddr*)&client_addr, &addrlen);
-  ERROR_HELPER(ret, "[ERROR] Error receiving UDP packet!!!");
+  //printf("[UDP RECEIVER] Ready to receive packets...\n");
+  while (1) {
+    printf("[UDP RECEIVER] Waiting packets...\n");
 
-  // Raccoglie il pacchetto ricevuto
-  PacketHeader* header = (PacketHeader*)buffer_recv;
+    if((ret = recvfrom(udp_socket, buffer_recv, BUFFER_SIZE, 0, (struct sockaddr*)&client_addr, &addrlen)) > 0) {}//printf("[UDP RECEIVER] Packet received...\n");
+    ERROR_HELPER(ret, "[ERROR] Error receiving UDP packet!!!");
 
-  VehicleUpdatePacket* packet = (VehicleUpdatePacket*)Packet_deserialize(buffer_recv, header->size);
-  User* user = User_find_id(users, packet->id);
+    // Raccoglie il pacchetto ricevuto
+    PacketHeader* header = (PacketHeader*) buffer_recv;
 
-  if(!user) {
-  	printf("[ERROR] Cannot find a user with this ID: %d!!!\n", packet->id);
-    pthread_exit(0);
+    VehicleUpdatePacket* packet = (VehicleUpdatePacket*)Packet_deserialize(buffer_recv, header->size);
+    User* user = User_find_id(users, packet->id);
+    user->user_addr_udp = client_addr;
+
+    printf("[UDP RECEIVER] Update received from user (%d)...\n", user->id);
+
+    if(!user) {
+    	printf("[ERROR] Cannot find a user with this ID: %d!!!\n", packet->id);
+      pthread_exit(0);
+    }
+    
+    // Aggiorna la posizione dell'utente
+    Vehicle* vehicle_aux = World_getVehicle(&world, user->id);
+
+    printf("[UDP RECEIVER] ROTATIONAL: %f, TRANSLATIONAL: %f\n", packet->rotational_force, packet->translational_force);
+
+    Vehicle_setForcesUpdate(vehicle_aux, packet->translational_force, packet->rotational_force);
+    // printf("[UDP RECEIVER] Forces updated (%d)...\n", user->id);
+
+    // Update del mondo
+    World_update(&world);
+    // printf("[UDP RECEIVER] World updated...\n");
   }
-  
-  // Aggiorna la posizione dell'utente
-  Vehicle_setForcesUpdate(user->vehicle, packet->translational_force, packet->rotational_force);
-  
-  // Update del mondo
-  World_update(&world);
+
+  printf("[UDP RECEIVER] Closing receiver...\n");
 
   //Packet_free(&packet->header);	// Liberazione memoria utilizzata
   pthread_exit(0);
 }
 
-
 /* Handler della connessione UDP con il client in modalità 'sender' (invia pacchetti) */
 void* UDP_sender_handler(void* args) {
-  printf("[UDP SENDER] Handler started...\n");
-
+  // printf("[UDP SENDER] Handler started...\n");
   char buffer_send[BUFFER_SIZE];
 
-  // Creazione del pacchetto da inviare
-  PacketHeader header;
-  header.type = WorldUpdate;
+  //int ret;
+  udp_args_t* udp_args = (udp_args_t*) args;
+  int udp_socket = udp_args->udp_socket;
 
-  WorldUpdatePacket* world_update = (WorldUpdatePacket*) malloc(sizeof(WorldUpdatePacket));
-  world_update->header = header;
+  // printf("[UDP SENDER] Ready to send updates...\n");
+  while(1) {
+    // printf("[UDP SENDER] Sending new update...\n");
+    // Creazione del pacchetto da inviare
+    
+    int n_users = users->size;
+    // printf("[UDP SENDER] There are %d users...\n", n_users);
 
-  int n_users = 0;
- 
-  // Conta il numero di utenti collegati
-  User* user = users->first;
-  while(user != NULL) {
-    n_users++;
-    user = user->next;
-  }
-  user = users->first;
+    PacketHeader header;
+    header.type = WorldUpdate;
 
-  world_update->updates = (ClientUpdate*)malloc(sizeof(ClientUpdate) * n_users);
+    WorldUpdatePacket* world_update = (WorldUpdatePacket*) malloc(sizeof(WorldUpdatePacket));
+    world_update->header = header;
+    world_update->updates = (ClientUpdate*) malloc(sizeof(ClientUpdate) * n_users);
 
-  for (int i=0; i<n_users; i++) {
-    ClientUpdate* client = &(world_update->updates[i]);
+    User* user = users->first;
 
-    client->id = user->id;
-    Vehicle_getXYTheta(user->vehicle, &(client->x), &(client->y), &(client->theta));
+    for (int i=0; i<n_users; i++) {
+      // printf("[UDP SENDER] Handling user %d...\n", user->id);
+      ClientUpdate* client = &(world_update->updates[i]);
 
-    user = user->next;
-  }
+      user->vehicle = World_getVehicle(&world, user->id);
+      client->id = user->id;
+      client->x = user->vehicle->x;
+      client->y = user->vehicle->y;
+      client->theta = user->vehicle->theta;
+      // printf("[UDP SENDER] End handling user %d...\n", user->id);
 
-  // Serializzazione del pacchetto per update nel buffer
-  int size = Packet_serialize(buffer_send, &world_update->header);
+      user = user->next;
+    }
 
-  user = users->first;
+    // Serializzazione del pacchetto per update nel buffer
+    int size = Packet_serialize(buffer_send, &world_update->header);
 
-  // Invia i pacchetti a tutti gli utenti connessi
-  while (user != NULL) {
-    int ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*)&user->user_addr_udp, (socklen_t)sizeof(user->user_addr_udp));
-    ERROR_HELPER(ret, "[ERROR] Error sending update to user!!!");
-    user = user->next;
+    user = users->first;
+
+    // Invia i pacchetti a tutti gli utenti connessi
+    while (user != NULL) {
+      // printf("[UDP SENDER] Sending update to %d...\n", user->id);
+
+      int ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*) &user->user_addr_udp, (socklen_t)sizeof(user->user_addr_udp));
+      ERROR_HELPER(ret, "[ERROR] Error sending update to user!!!");
+
+      printf("[UDP SENDER] Update sent to the user (%d)...\n", user->id);
+
+      user = user->next;
+    }
+
+    // printf("[UDP SENDER] Wait for next update to send...\n");
+
+    usleep(TIME_TO_SLEEP);
   }
 
   // Liberazione memoria
@@ -414,6 +452,7 @@ void* UDP_sender_handler(void* args) {
 /* Main */
 int main(int argc, char **argv) {
   int ret;	// Variabile utilizzata per i vari controlli sui return delle connessioni, ...
+  int tcp_socket, udp_socket;
 
   if (argc<3) {
     printf("usage: %s <elevation_image> <texture_image>\n", argv[1]);
@@ -463,17 +502,17 @@ int main(int argc, char **argv) {
   int reuseaddr_opt_tcp = 1;
   ret = setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &reuseaddr_opt_tcp, sizeof(reuseaddr_opt_tcp));
   ERROR_HELPER(ret, "[ERROR] Failed setsockopt on TCP server socket!!!");
-  if(ret>=0) printf("[MAIN] Setsockopt worked TCP...\n");
+  // if(ret>=0) printf("[MAIN] Setsockopt worked TCP...\n");
   
   ret = bind(tcp_socket, (struct sockaddr*) &tcp_server_addr, sockaddr_len);
   ERROR_HELPER(ret, "[ERROR] Failed bind address on TCP server socket!!!");
-  if(ret>=0) printf("[MAIN] Bind worked TCP...\n");
+  // if(ret>=0) printf("[MAIN] Bind worked TCP...\n");
 
   ret = listen(tcp_socket, 3);
   ERROR_HELPER(ret, "[ERROR] Failed listen on TCP server socket!!!");
   if (ret>=0) printf("[MAIN] Server listening on port %d...\n", TCP_PORT);
 
-  fprintf(stdout, "[MAIN] Server TCP started...\n");  // DEBUG OUTPUT
+  // printf("[MAIN] Server TCP started...\n");  // DEBUG OUTPUT
 
   // Inizializza server UDP
   udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
@@ -487,22 +526,22 @@ int main(int argc, char **argv) {
   int reuseaddr_opt_udp = 1;
   ret = setsockopt(udp_socket, SOL_SOCKET, SO_REUSEADDR, &reuseaddr_opt_udp, sizeof(reuseaddr_opt_udp));
   ERROR_HELPER(ret, "[ERROR] Failed setsockopt on UDP server socket!!!");
-  if(ret>=0) printf("[MAIN] Setsockopt worked UDP...\n");
+  // if(ret>=0) printf("[MAIN] Setsockopt worked UDP...\n");
 
   ret = bind(udp_socket, (struct sockaddr*) &udp_server_addr, sizeof(udp_server_addr));
   ERROR_HELPER(ret, "[ERROR] Failed bind address on UDP server socket!!!");
-  if(ret>=0) printf("[MAIN] Bind worked UDP...\n");
+  // if(ret>=0) printf("[MAIN] Bind worked UDP...\n");
 
   printf("[MAIN] Server UDP started...\n");  // DEBUG OUTPUT
 
-  // Inizializzazione utenti
+  // Inizializzazione utentiint tcp_socket, udp_socket;
   users = (UserHead*) malloc(sizeof(UserHead));
   Users_init(users);
-  printf("[MAIN] User list initialized...\n");
+  // printf("[MAIN] User list initialized...\n");
 
   // Inizializzazione del mondo
   World_init(&world, surface_elevation, surface_texture,  0.5, 0.5, 0.5);
-  printf("[MAIN] World initialized...\n");
+  // printf("[MAIN] World initialized...\n");
 
   /* ------------------- */
   /* Gestione dei thread */
@@ -513,21 +552,25 @@ int main(int argc, char **argv) {
   tcp_args_t tcp_args;
   tcp_args.elevation_texture = surface_texture;
   tcp_args.surface_elevation = surface_elevation;
+  tcp_args.tcp_socket = tcp_socket;
 
-  printf("[MAIN] Initializating threads...\n");
+  udp_args_t udp_args;
+  udp_args.udp_socket = udp_socket;
+
+  // printf("[MAIN] Initializating threads...\n");
 
   // Create dei thread 
   ret = pthread_create(&TCP_connection, NULL, TCP_handler, &tcp_args);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] [MAIN] Failed to create TCP connection thread!!!");
 
-  ret = pthread_create(&UDP_sender_thread, NULL, UDP_sender_handler, NULL);
+  ret = pthread_create(&UDP_sender_thread, NULL, UDP_sender_handler, &udp_args);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] [MAIN] Failed to create UDP sender thread!!!");
 
-  ret = pthread_create(&UDP_receiver_thread, NULL, UDP_receiver_handler, NULL); 
+  ret = pthread_create(&UDP_receiver_thread, NULL, UDP_receiver_handler, &udp_args); 
   PTHREAD_ERROR_HELPER(ret, "[ERROR] [MAIN] Failed to create UDP receiver thread!!!");
 
-  printf("[MAIN] Threads created...\n");
-  printf("[MAIN] Joining threads...\n");
+  // printf("[MAIN] Threads created...\n");
+  // printf("[MAIN] Joining threads...\n");
 
   // Join dei thread 
   ret=pthread_join(TCP_connection,NULL);
@@ -539,8 +582,8 @@ int main(int argc, char **argv) {
   ret=pthread_join(UDP_receiver_thread,NULL);
   ERROR_HELPER(ret,"[ERROR] [MAIN] Failed to join UDP server receiver thread!!!");
 
-  printf("[MAIN] Threads joined...\n");
-  printf("[MAIN] Closing...\n");
+  // printf("[MAIN] Threads joined...\n");
+  // printf("[MAIN] Closing...\n");
 
   // Cleanup generale per liberare la memoria utilizzata
   Image_free(surface_texture);
