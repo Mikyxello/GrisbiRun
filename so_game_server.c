@@ -23,7 +23,7 @@
 #define TCP_PORT        25252         // Porta per la connessione TCP
 #define UDP_PORT        8888          // Porta per la connessione UDP
 #define SERVER_ADDRESS  "127.0.0.1"   // Indirizzo del server (localhost)
-#define TIME_TO_SLEEP   1000000         // Imposta timeout di aggiornamento
+#define TIME_TO_SLEEP   100000         // Imposta timeout di aggiornamento
 
 // Struttura per args dei threads in TCP
 typedef struct {
@@ -241,6 +241,8 @@ void* TCP_client_handler (void* args){
   user->x = 0;
   user->y = 0;
   user->theta = 0;
+  user->translational_force = 0;
+  user->rotational_force = 0;
   user->vehicle = NULL;
   User_insert_last(users, user);
 
@@ -253,9 +255,12 @@ void* TCP_client_handler (void* args){
     	if (ret==-1 && errno == EINTR) continue;
     	ERROR_HELPER(ret, "[ERROR] Failed to receive packet!!!");
     }
+    // Client disconnesso
     if (ret == 0) {
-      printf("[TCP] Connection closed with (%d)...\n", user->id);
+      //printf("[TCP] Connection closed with (%d)...\n", user->id);
       if(User_remove_id(users, user->id) == 1) printf("[TCP] User (%d) removed...\n", user->id);
+      Vehicle* aux = World_detachVehicle(&world, World_getVehicle(&world, user->id));
+      Vehicle_destroy(aux);
       break;
     }
 
@@ -343,7 +348,7 @@ void* UDP_receiver_handler(void* args) {
   
   //printf("[UDP RECEIVER] Ready to receive packets...\n");
   while (1) {
-    printf("[UDP RECEIVER] Waiting packets...\n");
+    //printf("[UDP RECEIVER] Waiting packets...\n");
 
     if((ret = recvfrom(udp_socket, buffer_recv, BUFFER_SIZE, 0, (struct sockaddr*)&client_addr, &addrlen)) > 0) {}//printf("[UDP RECEIVER] Packet received...\n");
     ERROR_HELPER(ret, "[ERROR] Error receiving UDP packet!!!");
@@ -355,7 +360,7 @@ void* UDP_receiver_handler(void* args) {
     User* user = User_find_id(users, packet->id);
     user->user_addr_udp = client_addr;
 
-    printf("[UDP RECEIVER] Update received from user (%d)...\n", user->id);
+    //printf("[UDP RECEIVER] Update received from user (%d)...\n", user->id);
 
     if(!user) {
     	printf("[ERROR] Cannot find a user with this ID: %d!!!\n", packet->id);
@@ -365,7 +370,7 @@ void* UDP_receiver_handler(void* args) {
     // Aggiorna la posizione dell'utente
     Vehicle* vehicle_aux = World_getVehicle(&world, user->id);
 
-    printf("[UDP RECEIVER] ROTATIONAL: %f, TRANSLATIONAL: %f\n", packet->rotational_force, packet->translational_force);
+    //printf("[UDP RECEIVER] ROTATIONAL: %f, TRANSLATIONAL: %f\n", packet->rotational_force, packet->translational_force);
 
     Vehicle_setForcesUpdate(vehicle_aux, packet->translational_force, packet->rotational_force);
     // printf("[UDP RECEIVER] Forces updated (%d)...\n", user->id);
@@ -404,6 +409,7 @@ void* UDP_sender_handler(void* args) {
     WorldUpdatePacket* world_update = (WorldUpdatePacket*) malloc(sizeof(WorldUpdatePacket));
     world_update->header = header;
     world_update->updates = (ClientUpdate*) malloc(sizeof(ClientUpdate) * n_users);
+    world_update->num_vehicles = users->size;
 
     User* user = users->first;
 
@@ -429,11 +435,12 @@ void* UDP_sender_handler(void* args) {
     // Invia i pacchetti a tutti gli utenti connessi
     while (user != NULL) {
       // printf("[UDP SENDER] Sending update to %d...\n", user->id);
+      if(user->user_addr_udp.sin_addr.s_addr != 0) {
+        int ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*) &user->user_addr_udp, (socklen_t)sizeof(user->user_addr_udp));
+        ERROR_HELPER(ret, "[ERROR] Error sending update to user!!!");
+      }
 
-      int ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*) &user->user_addr_udp, (socklen_t)sizeof(user->user_addr_udp));
-      ERROR_HELPER(ret, "[ERROR] Error sending update to user!!!");
-
-      printf("[UDP SENDER] Update sent to the user (%d)...\n", user->id);
+      //printf("[UDP SENDER] Update sent to the user (%d)...\n", user->id);
 
       user = user->next;
     }

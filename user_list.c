@@ -60,11 +60,13 @@ int User_remove_id(UserHead* head, int id) {
 
   User* user = head->first;
 
-  while (user->next != NULL && user->next->id == id) {
-    user->next = user->next->next;
-    head->size = head->size - 1;
-    return 1;
-  }
+  while (user != NULL && user->next != NULL) {
+    if(user->next->id == id) {
+      user->next = user->next->next;
+      return 1;
+    }
 
+    user = user->next;
+  }
   return 0;
 }

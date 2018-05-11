@@ -21,8 +21,8 @@
 #include "user_list.h"
 #include "semaphore.h"
 
-#define TIME_TO_SLEEP    5000000
-#define WORLD_SIZE       1000
+#define TIME_TO_SLEEP    100000
+#define WORLD_SIZE       10
 #define SERVER_ADDRESS   "127.0.0.1"
 #define TCP_PORT         25252
 #define UDP_PORT         8888
@@ -82,19 +82,15 @@ void* UDP_Sender(void* args){
     // Contenuto del pacchetto
     vehicle_packet->header = header;
     vehicle_packet->id = id;
-
-    Vehicle* vehicle_aux = World_getVehicle(&world, id);
-
-    vehicle_packet->rotational_force = vehicle_aux->rotational_force;
-    vehicle_packet->translational_force = vehicle_aux->translational_force;
-
+    vehicle_packet->rotational_force = vehicle->rotational_velocity;
+    vehicle_packet->translational_force = vehicle->translational_velocity;
     
     printf("X: %f, Y: %f, THETA: %f, ROTATIONAL: %f, TRANSLATIONAL: %f\n", 
-      vehicle_aux->x,
-      vehicle_aux->y,
-      vehicle_aux->theta,
-      vehicle_aux->rotational_force,
-      vehicle_aux->translational_force);
+      floorf(vehicle->x * 100) / 100,
+      floorf(vehicle->y * 100) / 100,
+      floorf(vehicle->theta * 100) / 100,
+      floorf(vehicle->rotational_velocity * 100) / 100,
+      floorf(vehicle->translational_velocity * 100) / 100);
 
     // Serializzazione del pacchetto
     int buffer_size = Packet_serialize(buffer, &vehicle_packet->header);
@@ -106,6 +102,8 @@ void* UDP_Sender(void* args){
     ERROR_HELPER(ret,"[ERROR] Failed sending update to the server!!!");
 
     //printf("[UPD SENDER] Update sent...\n");
+
+    World_update(&world);
 
     usleep(TIME_TO_SLEEP);
   }
@@ -140,7 +138,7 @@ void* UDP_Receiver(void* args){
     buffer_size += ret;
 
     WorldUpdatePacket* world_update = (WorldUpdatePacket*) Packet_deserialize(buffer, buffer_size);
-    // printf("[UDP RECEIVER] Loaded update...\n");
+    //printf("[UDP RECEIVER] Loaded update...\n");
 
     // Aggiorna le posizioni dei veicoli
 
@@ -149,10 +147,24 @@ void* UDP_Receiver(void* args){
 
       Vehicle* client_vehicle = World_getVehicle(&world, client->id);
 
+      //printf("[UDP RECEIVER] Vehicle id (%d)...\n", client_vehicle->id);
+
+      if (client_vehicle == 0) {
+        //printf("[UDP RECEIVER] Adding new player (%d)...\n", client->id);
+        Vehicle* v = (Vehicle*) malloc(sizeof(Vehicle));
+        Vehicle_init(v, &world, client->id, vehicle->texture);
+        //printf("[MAIN] Vehicle initialized...\n");
+        World_addVehicle(&world, v);
+      }
+
+      client_vehicle = World_getVehicle(&world, client->id);
+
       client_vehicle->x = client->x;
       client_vehicle->y = client->y;
       client_vehicle->theta = client->theta;
     }
+
+    World_update(&world);
 
   }
 
