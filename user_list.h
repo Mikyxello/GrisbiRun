@@ -21,4 +21,4 @@ void Users_init(UserHead* head);
 User* User_find_id(UserHead* head, int id);
 User* User_find(UserHead* head, User* user);
 User* User_insert_last(UserHead* head, User* user);
-int User_remove_id(UserHead* head, int id);
+int User_detach(UserHead* head, int id);

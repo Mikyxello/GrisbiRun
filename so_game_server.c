@@ -23,7 +23,7 @@
 #define TCP_PORT        25252         // Porta per la connessione TCP
 #define UDP_PORT        8888          // Porta per la connessione UDP
 #define SERVER_ADDRESS  "127.0.0.1"   // Indirizzo del server (localhost)
-#define TIME_TO_SLEEP   100000         // Imposta timeout di aggiornamento
+#define TIME_TO_SLEEP   10000         // Imposta timeout di aggiornamento
 
 // Struttura per args dei threads in TCP
 typedef struct {
@@ -44,7 +44,7 @@ World world;
 UserHead* users; 	// Inizio lista utenti per ricerca
 
 /* Gestione pacchetti TCP ricevuti */
-int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture, int len) {
+int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture, int len, User* user) {
   PacketHeader* header = (PacketHeader*) buffer;  // Pacchetto per controllo del tipo di richiesta
 
   // Se la richiesta dal client a questo server è per l'ID (invia l'id assegnato al client che lo richiede)
@@ -209,6 +209,9 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
 
     //Packet_free(&received_texture->header); // Libera la memoria del pacchetto non più utilizzato
     //Packet_free(&texture_for_client->header);
+    User_insert_last(users, user);
+
+    printf("[TCP] User (%d) inserted...\n", user->id);
 
     return 1;
   }
@@ -244,9 +247,6 @@ void* TCP_client_handler (void* args){
   user->translational_force = 0;
   user->rotational_force = 0;
   user->vehicle = NULL;
-  User_insert_last(users, user);
-
-  //printf("[TCP] User (%d) inserted...\n", tcp_client_desc);
 
   // Ricezione del pacchetto
   int packet_length = BUFFER_SIZE;
@@ -257,10 +257,13 @@ void* TCP_client_handler (void* args){
     }
     // Client disconnesso
     if (ret == 0) {
-      //printf("[TCP] Connection closed with (%d)...\n", user->id);
-      if(User_remove_id(users, user->id) == 1) printf("[TCP] User (%d) removed...\n", user->id);
-      Vehicle* aux = World_detachVehicle(&world, World_getVehicle(&world, user->id));
-      Vehicle_destroy(aux);
+      printf("[TCP] Connection closed with (%d)...\n", user->id);
+      if(User_detach(users, user->id) == 1) printf("[TCP] User (%d) removed...\n", user->id);
+      //Vehicle* aux = World_detachVehicle(&world, World_getVehicle(&world, user->id));
+      //Vehicle_destroy(aux);
+
+      //printf("[FATTO]\n");
+
       break;
     }
 
@@ -269,10 +272,11 @@ void* TCP_client_handler (void* args){
     //printf("[TCP] Received packet (total size = %d)...\n", ((PacketHeader*) buffer_recv)->size);
 
     // Gestione del pacchetto ricevuto tramite l'handler dei pacchetti
-    ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture, msg_length);
+    ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture, msg_length, user);
 
     if (ret == 1) {
       // printf("[TCP] Success...\n");
+
       msg_length = 0;
       continue;
     }
@@ -318,15 +322,8 @@ void* TCP_handler(void* args){
     // Thread create
     ret = pthread_create(&client_thread, NULL, TCP_client_handler, &tcp_args_aux);
     PTHREAD_ERROR_HELPER(ret, "[ERROR] Failed to create TCP client thread!!!");
-
-    /* 
-    // Thread join
-    ret=pthread_join(client_thread, NULL);
-    ERROR_HELPER(ret,"[ERROR] Failed to join TCP client handling thread!!!");
-    */
   }
   ERROR_HELPER(tcp_client_desc, "[ERROR] Failed to accept client TCP connection!!!");
-
 
   // Chiusura thread
   pthread_exit(0);
@@ -372,7 +369,8 @@ void* UDP_receiver_handler(void* args) {
 
     //printf("[UDP RECEIVER] ROTATIONAL: %f, TRANSLATIONAL: %f\n", packet->rotational_force, packet->translational_force);
 
-    Vehicle_setForcesUpdate(vehicle_aux, packet->translational_force, packet->rotational_force);
+    vehicle_aux->translational_force_update = packet->translational_force;
+    vehicle_aux->rotational_force_update = packet->rotational_force;
     // printf("[UDP RECEIVER] Forces updated (%d)...\n", user->id);
 
     // Update del mondo
@@ -388,64 +386,66 @@ void* UDP_receiver_handler(void* args) {
 
 /* Handler della connessione UDP con il client in modalità 'sender' (invia pacchetti) */
 void* UDP_sender_handler(void* args) {
-  // printf("[UDP SENDER] Handler started...\n");
+  //printf("[UDP SENDER] Handler started...\n");
   char buffer_send[BUFFER_SIZE];
 
   //int ret;
   udp_args_t* udp_args = (udp_args_t*) args;
   int udp_socket = udp_args->udp_socket;
 
-  // printf("[UDP SENDER] Ready to send updates...\n");
+  printf("[UDP SENDER] Ready to send updates...\n");
   while(1) {
-    // printf("[UDP SENDER] Sending new update...\n");
+    //printf("[UDP SENDER] Sending new update...\n");
     // Creazione del pacchetto da inviare
     
     int n_users = users->size;
-    // printf("[UDP SENDER] There are %d users...\n", n_users);
+    //printf("[UDP SENDER] There are %d users...\n", n_users);
 
-    PacketHeader header;
-    header.type = WorldUpdate;
+    if (n_users > 0) {
+      PacketHeader header;
+      header.type = WorldUpdate;
 
-    WorldUpdatePacket* world_update = (WorldUpdatePacket*) malloc(sizeof(WorldUpdatePacket));
-    world_update->header = header;
-    world_update->updates = (ClientUpdate*) malloc(sizeof(ClientUpdate) * n_users);
-    world_update->num_vehicles = users->size;
+      WorldUpdatePacket* world_update = (WorldUpdatePacket*) malloc(sizeof(WorldUpdatePacket));
+      world_update->header = header;
+      world_update->updates = (ClientUpdate*) malloc(sizeof(ClientUpdate) * n_users);
+      world_update->num_vehicles = users->size;
 
-    User* user = users->first;
+      User* user = users->first;
 
-    for (int i=0; i<n_users; i++) {
-      // printf("[UDP SENDER] Handling user %d...\n", user->id);
-      ClientUpdate* client = &(world_update->updates[i]);
+      for (int i=0; i<n_users; i++) {
+        //printf("[UDP SENDER] Handling user %d...\n", user->id);
+        ClientUpdate* client = &(world_update->updates[i]);
 
-      user->vehicle = World_getVehicle(&world, user->id);
-      client->id = user->id;
-      client->x = user->vehicle->x;
-      client->y = user->vehicle->y;
-      client->theta = user->vehicle->theta;
-      // printf("[UDP SENDER] End handling user %d...\n", user->id);
+        user->vehicle = World_getVehicle(&world, user->id);
+        client->id = user->id;
+        client->x = user->vehicle->x;
+        client->y = user->vehicle->y;
+        client->theta = user->vehicle->theta;
+        //printf("[UDP SENDER] End handling user %d...\n", user->id);
 
-      user = user->next;
-    }
-
-    // Serializzazione del pacchetto per update nel buffer
-    int size = Packet_serialize(buffer_send, &world_update->header);
-
-    user = users->first;
-
-    // Invia i pacchetti a tutti gli utenti connessi
-    while (user != NULL) {
-      // printf("[UDP SENDER] Sending update to %d...\n", user->id);
-      if(user->user_addr_udp.sin_addr.s_addr != 0) {
-        int ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*) &user->user_addr_udp, (socklen_t)sizeof(user->user_addr_udp));
-        ERROR_HELPER(ret, "[ERROR] Error sending update to user!!!");
+        user = user->next;
       }
 
-      //printf("[UDP SENDER] Update sent to the user (%d)...\n", user->id);
+      // Serializzazione del pacchetto per update nel buffer
+      int size = Packet_serialize(buffer_send, &world_update->header);
 
-      user = user->next;
+      user = users->first;
+
+      // Invia i pacchetti a tutti gli utenti connessi
+      while (user != NULL) {
+        //printf("[UDP SENDER] Sending update to %d...\n", user->id);
+        if(user->user_addr_udp.sin_addr.s_addr != 0) {
+          int ret = sendto(udp_socket, buffer_send, size, 0, (struct sockaddr*) &user->user_addr_udp, (socklen_t)sizeof(user->user_addr_udp));
+          ERROR_HELPER(ret, "[ERROR] Error sending update to user!!!");
+        }
+
+        //printf("[UDP SENDER] Update sent to the user (%d)...\n", user->id);
+
+        user = user->next;
+      }
     }
 
-    // printf("[UDP SENDER] Wait for next update to send...\n");
+    //printf("[UDP SENDER] Wait for next update to send...\n");
 
     usleep(TIME_TO_SLEEP);
   }

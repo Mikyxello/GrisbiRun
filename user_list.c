@@ -68,5 +68,44 @@ int User_remove_id(UserHead* head, int id) {
 
     user = user->next;
   }
+
   return 0;
+}
+
+User* User_find_prev(UserHead* head, int id) {
+  // linear scanning of User
+  User* aux=head->first;
+  while(aux){
+    if (aux->next != NULL) {
+      if (aux->next->id == id) {
+        return aux;
+      }
+    }
+    aux=aux->next;
+  }
+  return 0;
+}
+
+int User_detach(UserHead* head, int id) {
+
+  // we check that the element is in the list
+  User* user = User_find_id(head, id);
+
+  if(!user) return -1;
+
+  User* prev = User_find_prev(head, id);
+  User* next = user->next;
+
+  if (prev) {
+    prev->next = next;
+  }
+  else if(next){
+    head->first = next;
+  }
+  else if(user) {
+    head->first = NULL;
+  }
+  
+  head->size--;
+  return 1;
 }

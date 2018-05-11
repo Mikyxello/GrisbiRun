@@ -21,7 +21,7 @@
 #include "user_list.h"
 #include "semaphore.h"
 
-#define TIME_TO_SLEEP    100000
+#define TIME_TO_SLEEP    10000
 #define WORLD_SIZE       10
 #define SERVER_ADDRESS   "127.0.0.1"
 #define TCP_PORT         25252
@@ -45,8 +45,6 @@ typedef struct {
   volatile int run;
   World* world;
 } UpdaterArgs;
-
-localWorld player_world;
 
 int window;
 WorldViewer viewer;
@@ -72,7 +70,6 @@ void* UDP_Sender(void* args){
   while(1) {
     // Preparazione aggiornamento da inviare al server
     //printf("[UDP SENDER] Sending new update...\n");
-  	Vehicle_update(vehicle, 1);
     VehicleUpdatePacket* vehicle_packet = (VehicleUpdatePacket*) malloc(sizeof(VehicleUpdatePacket));
 
     // Header pacchetto    
@@ -82,15 +79,16 @@ void* UDP_Sender(void* args){
     // Contenuto del pacchetto
     vehicle_packet->header = header;
     vehicle_packet->id = id;
-    vehicle_packet->rotational_force = vehicle->rotational_velocity;
-    vehicle_packet->translational_force = vehicle->translational_velocity;
+
+    vehicle_packet->rotational_force = vehicle->rotational_force_update;
+    vehicle_packet->translational_force = vehicle->translational_force_update;
     
     printf("X: %f, Y: %f, THETA: %f, ROTATIONAL: %f, TRANSLATIONAL: %f\n", 
-      floorf(vehicle->x * 100) / 100,
-      floorf(vehicle->y * 100) / 100,
-      floorf(vehicle->theta * 100) / 100,
-      floorf(vehicle->rotational_velocity * 100) / 100,
-      floorf(vehicle->translational_velocity * 100) / 100);
+      vehicle->x,
+      vehicle->y,
+      vehicle->theta,
+      vehicle->rotational_force_update,
+      vehicle->translational_force_update);
 
     // Serializzazione del pacchetto
     int buffer_size = Packet_serialize(buffer, &vehicle_packet->header);
@@ -103,7 +101,7 @@ void* UDP_Sender(void* args){
 
     //printf("[UPD SENDER] Update sent...\n");
 
-    World_update(&world);
+    //World_update(&world);
 
     usleep(TIME_TO_SLEEP);
   }
@@ -184,6 +182,7 @@ void* updater_thread(void* args_){
   }
   return 0;
 }
+
 
 
  /* ----------------- */
@@ -527,7 +526,6 @@ int main(int argc, char **argv) {
 
   ret = pthread_create(&runner_thread, &runner_attrs, updater_thread, &runner_args);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Can't create runner thread!!!");
-
   //printf("[MAIN] Threads created...\n");
 
   WorldViewer_runGlobal(&world, vehicle, &argc, argv);
