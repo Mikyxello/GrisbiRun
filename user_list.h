@@ -7,7 +7,6 @@ typedef struct User {
   int id;
   struct sockaddr_in user_addr_tcp;
   struct sockaddr_in user_addr_udp;
-  Vehicle* vehicle;
   float x, y, theta;
   float rotational_force, translational_force;
 } User;

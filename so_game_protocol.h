@@ -9,7 +9,9 @@ typedef enum {
   PostTexture=0x4,
   PostElevation=0x5,
   WorldUpdate=0x6,
-  VehicleUpdate=0x7
+  VehicleUpdate=0x7,
+  UserConnected=0x8,
+  UserDisconnected=0x9
 } Type;
 
 typedef struct {
