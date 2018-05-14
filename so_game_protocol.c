@@ -21,16 +21,16 @@ int Packet_serialize(char* dest, const PacketHeader* h){
     case PostTexture:
     case PostElevation:
     {
-      printf("cast\n");
+      //printf("cast\n");
       const ImagePacket* img_packet=(ImagePacket*) h;
-      printf("memcopy\n");
+      //printf("memcopy\n");
       memcpy(dest,img_packet,sizeof(ImagePacket));
       // the image is invalid, we need to read it from the buffer
-      printf("forward address\n");
+      //printf("forward address\n");
       dest_end+=sizeof(ImagePacket);
-      printf("image serialization");
+      //printf("image serialization");
       dest_end+=Image_serialize(img_packet->image, dest_end, 1024*1024);
-      printf("end\n");
+      //printf("end\n");
       break;
     }
     case WorldUpdate:

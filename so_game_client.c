@@ -383,6 +383,7 @@ void* TCP_connections_receiver(void* args) {
 
         PacketHeader* head = (PacketHeader*) Packet_deserialize(buffer, actual_size);
 
+        // Se si connette un user
 	  		if(head->type == UserConnected) {
 					// Load della texture ricevuta
 					ImagePacket* texture_back = (ImagePacket*) Packet_deserialize(buffer, actual_size);
@@ -394,15 +395,16 @@ void* TCP_connections_receiver(void* args) {
 
           printf("[USER CONNECTED] User %d joined the game...\n", texture_back->id);
 
-            while ( (ret = send(tcp_socket, buffer, 4, 0)) < 0) {
-           if (errno == EINTR) continue;
+          // Invia conferma al server
+          while ( (ret = send(tcp_socket, buffer, 4, 0)) < 0) {
+            if (errno == EINTR) continue;
             ERROR_HELPER(ret, "[ERROR] Cannot write to socket sending vehicle texture!!!");
           }
 
-
-
 					break;
   			}
+
+        // Se si disconnette un user
   			else if(head->type == UserDisconnected) {
   				IdPacket* id_disconnected = (IdPacket*) Packet_deserialize(buffer, buffer_size);
 
@@ -445,12 +447,12 @@ int main(int argc, char **argv) {
     exit(-1);
   }
 
-  printf("loading texture image from %s ... ", argv[2]);
+  //printf("loading texture image from %s ... ", argv[2]);
   Image* my_texture = Image_load(argv[2]);
   if (my_texture) {
-    printf("Done! \n");
+    //printf("Done! \n");
   } else {
-    printf("Fail! \n");
+    //printf("Fail! \n");
   }
 
   server_address = argv[1];

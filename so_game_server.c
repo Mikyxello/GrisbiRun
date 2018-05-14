@@ -260,12 +260,11 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
 		      msg_length += ret;
 		    }
 
-        //wait del client 
-
-      while( (ret = recv(user->id, buffer_connection_new, 12, 0)) < 0){
-      if (ret==-1 && errno == EINTR) continue;
-      ERROR_HELPER(ret, "[ERROR] Failed to receive packet!!!");
-    }
+		    // Attende la conferma del client
+			while( (ret = recv(user->id, buffer_connection_new, 12, 0)) < 0){
+				if (ret==-1 && errno == EINTR) continue;
+				ERROR_HELPER(ret, "[ERROR] Failed to receive packet!!!");
+			}
 
 	    }
 
@@ -520,31 +519,31 @@ int main(int argc, char **argv) {
   char* elevation_filename=argv[1];
   char* texture_filename=argv[2];
   char* vehicle_texture_filename="./images/arrow-right.ppm";
-  printf("loading elevation image from %s ... ", elevation_filename);
+  //printf("loading elevation image from %s ... ", elevation_filename);
 
   // load the images
   Image* surface_elevation = Image_load(elevation_filename);
   if (surface_elevation) {
-    printf("Done! \n");
+    //printf("Done! \n");
   } else {
-    printf("Fail! \n");
+    //printf("Fail! \n");
   }
 
 
-  printf("loading texture image from %s ... ", texture_filename);
+  //printf("loading texture image from %s ... ", texture_filename);
   Image* surface_texture = Image_load(texture_filename);
   if (surface_texture) {
-    printf("Done! \n");
+    //printf("Done! \n");
   } else {
-    printf("Fail! \n");
+    //printf("Fail! \n");
   }
 
-  printf("loading vehicle texture (default) from %s ... ", vehicle_texture_filename);
+  //printf("loading vehicle texture (default) from %s ... ", vehicle_texture_filename);
   Image* vehicle_texture = Image_load(vehicle_texture_filename);
   if (vehicle_texture) {
-    printf("Done! \n");
+    //printf("Done! \n");
   } else {
-    printf("Fail! \n");
+    //printf("Fail! \n");
   }
 
   // Inizializza server TCP 
