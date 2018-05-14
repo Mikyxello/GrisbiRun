@@ -369,6 +369,7 @@ void* TCP_connections_receiver(void* args) {
 		char buffer[BUFFER_SIZE];
 		int actual_size = 0;
 		int buffer_size = 0;
+    int ret=0;
 
 		while(1) {
 	  		while ( (buffer_size += recv(tcp_socket, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
@@ -392,6 +393,13 @@ void* TCP_connections_receiver(void* args) {
 			    World_addVehicle(&world, v);
 
           printf("[USER CONNECTED] User %d joined the game...\n", texture_back->id);
+
+            while ( (ret = send(tcp_socket, buffer, 4, 0)) < 0) {
+           if (errno == EINTR) continue;
+            ERROR_HELPER(ret, "[ERROR] Cannot write to socket sending vehicle texture!!!");
+          }
+
+
 
 					break;
   			}

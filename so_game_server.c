@@ -259,6 +259,14 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
 		      if (ret==0) break;
 		      msg_length += ret;
 		    }
+
+        //wait del client 
+
+      while( (ret = recv(user->id, buffer_connection_new, 12, 0)) < 0){
+      if (ret==-1 && errno == EINTR) continue;
+      ERROR_HELPER(ret, "[ERROR] Failed to receive packet!!!");
+    }
+
 	    }
 
 	    user_aux = user_aux->next;
