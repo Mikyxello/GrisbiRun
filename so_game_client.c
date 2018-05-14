@@ -28,6 +28,8 @@
 #define UDP_PORT         8888
 #define BUFFER_SIZE      1000000
 
+char* server_address = "127.0.0.1";
+
 typedef struct localWorld{
     int id_list[WORLD_SIZE];
     int players_online;
@@ -145,9 +147,11 @@ void* UDP_Receiver(void* args){
       client_vehicle->x = client->x;
       client_vehicle->y = client->y;
       client_vehicle->theta = client->theta;
+
+      World_update(&world);
     }
 
-    World_update(&world);
+    
   }
 
   printf("[UDP RECEIVER] Closed receiver...\n");
@@ -332,6 +336,9 @@ void send_Texture(Image** my_texture, Image** my_texture_from_server, int tcp_so
     while ( (buffer_size += recv(tcp_socket, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
       if (errno == EINTR) continue;
       ERROR_HELPER(-1, "[ERROR] Cannot read from socket receiving vehicle texture!!!");
+      if (ret == 0) {
+        printf("[ERROR] ...\n");
+      }
     }
 
     // Dimensione totale del pacchetto da ricevere
@@ -367,45 +374,49 @@ void* TCP_connections_receiver(void* args) {
 	  		while ( (buffer_size += recv(tcp_socket, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
 	  			if (errno == EINTR) continue;
 	  			ERROR_HELPER(-1, "[ERROR] Cannot read from socket on connections controller!!!");
-
 	  		}
 
-	  		PacketHeader* head = (PacketHeader*) Packet_deserialize(buffer, buffer_size);
+	  		actual_size = ((PacketHeader*) buffer)->size;
+
+        if (buffer_size < actual_size) continue;
+
+        PacketHeader* head = (PacketHeader*) Packet_deserialize(buffer, actual_size);
 
 	  		if(head->type == UserConnected) {
-				// Dimensione totale del pacchetto da ricevere
-				ImagePacket* texture_connected = (ImagePacket*) Packet_deserialize(buffer, buffer_size);
-				actual_size = texture_connected->header.size;
-
-				// Se la dimensione del pacchetto ricevuto è ancora minore della dimensione del pacchetto totale aspetta le altre parti
-				if (buffer_size < actual_size) continue;
-				else {
 					// Load della texture ricevuta
-					ImagePacket* texture_back = (ImagePacket*) Packet_deserialize(buffer, buffer_size);
+					ImagePacket* texture_back = (ImagePacket*) Packet_deserialize(buffer, actual_size);
 					Image* new_texture_user = texture_back->image;
 
-				    Vehicle* v = (Vehicle*) malloc(sizeof(Vehicle));
-				    Vehicle_init(v, &world, texture_back->id, new_texture_user);
-				    World_addVehicle(&world, v);
+			    Vehicle* v = (Vehicle*) malloc(sizeof(Vehicle));
+			    Vehicle_init(v, &world, texture_back->id, new_texture_user);
+			    World_addVehicle(&world, v);
+
+          printf("[USER CONNECTED] User %d joined the game...\n", texture_back->id);
 
 					break;
-				}
-			}
-			else if(head->type == UserDisconnected) {
-				IdPacket* id_disconnected = (IdPacket*) Packet_deserialize(buffer, buffer_size);
+  			}
+  			else if(head->type == UserDisconnected) {
+  				IdPacket* id_disconnected = (IdPacket*) Packet_deserialize(buffer, buffer_size);
 
-				Vehicle* vehicle_to_delete = World_getVehicle(&world, id_disconnected->id);
-				World_detachVehicle(&world, vehicle_to_delete);
-				Vehicle_destroy(vehicle_to_delete);
+  				Vehicle* vehicle_to_delete = World_getVehicle(&world, id_disconnected->id);
+  				World_detachVehicle(&world, vehicle_to_delete);
+  				Vehicle_destroy(vehicle_to_delete);
 
-				break;
-			}
+          printf("[USER DISCONNECTED] User %d left the game...\n", id_disconnected->id);
+
+  				break;
+  			}
+
+        else {
+          printf("[TCP CONNECTION CONTROLLER] Received unknown packet from server: %d...\n", head->type);
+          continue;
+        }
 		}
 	}
 
 	printf("[TCP CONNECTION CONTROLLER] Connection controller stopped...\n");
 
-  	pthread_exit(0);
+  pthread_exit(0);
 }
 
 
@@ -433,6 +444,8 @@ int main(int argc, char **argv) {
   } else {
     printf("Fail! \n");
   }
+
+  server_address = argv[1];
   
   //Image* my_texture_for_server;
   // todo: connect to the server
@@ -456,7 +469,7 @@ int main(int argc, char **argv) {
   tcp_socket = socket(AF_INET, SOCK_STREAM, 0);
   ERROR_HELPER(tcp_socket, "[ERROR] Could not create socket!!!");
 
-  server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDRESS);
+  server_addr.sin_addr.s_addr = inet_addr(server_address);
   server_addr.sin_family      = AF_INET;
   server_addr.sin_port        = htons(TCP_PORT);
 
@@ -469,7 +482,7 @@ int main(int argc, char **argv) {
   ERROR_HELPER(udp_socket, "[ERROR] Can't create an UDP socket!!!");
 
   struct sockaddr_in udp_server = {0}; // some fields are required to be filled with 0
-  udp_server.sin_addr.s_addr = inet_addr(SERVER_ADDRESS);
+  udp_server.sin_addr.s_addr = inet_addr(server_address);
   udp_server.sin_family      = AF_INET;
   udp_server.sin_port        = htons(UDP_PORT);
 
