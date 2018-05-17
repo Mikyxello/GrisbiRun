@@ -47,16 +47,14 @@ void cleanMemory(void) {
 
   running = 0;
 
-  /*
-  ret = pthread_kill(TCP_connection, SIGTERM);
+  ret = pthread_cancel(TCP_connection);
   ERROR_HELPER(ret, "[ERROR] Cannot terminate the TCP connection thread!!!");
 
-  ret = pthread_kill(UDP_sender_thread, SIGTERM);
+  ret = pthread_cancel(UDP_sender_thread);
   ERROR_HELPER(ret, "[ERROR] Cannot terminate the UDP sender thread!!!");
 
-  ret = pthread_kill(UDP_receiver_thread, SIGTERM);
+  ret = pthread_cancel(UDP_receiver_thread);
   ERROR_HELPER(ret, "[ERROR] Cannot terminate the UDP receiver thread!!!");
-  */
 
   ret = close(tcp_socket);
   ERROR_HELPER(ret, "[ERROR] Cannot close TCP socket!!!");
@@ -81,6 +79,14 @@ void signalHandler(int signal){
 	  exit(1);
 	case SIGINT:
 	  printf("[CLOSING] Server is closing...\n");
+	  cleanMemory();
+	  exit(1);
+	case SIGTERM:
+      printf("[CLOSING] Server is closing...\n");
+      cleanMemory();
+      exit(1);
+	case SIGSEGV:
+	  printf("[ERROR] Segmentation fault!!!\n");
 	  cleanMemory();
 	  exit(1);
 	default:
@@ -569,6 +575,10 @@ int main(int argc, char **argv) {
   ERROR_HELPER(ret,"[ERROR] Cannot handle SIGHUP!!!");
   ret = sigaction(SIGINT, &signal_action, NULL);
   ERROR_HELPER(ret,"[ERROR] Cannot handle SIGINT!!!");
+  ret = sigaction(SIGSEGV, &signal_action, NULL);
+  ERROR_HELPER(ret, "[ERROR] Cannot handle SIGSEGV!!!");
+  ret = sigaction(SIGTERM, &signal_action, NULL);
+  ERROR_HELPER(ret,"[ERROR] Cannot handle SIGTERM!!!");
 
   char* elevation_filename=argv[1];
   char* texture_filename=argv[2];
@@ -667,17 +677,5 @@ int main(int argc, char **argv) {
   ret = pthread_join(UDP_receiver_thread,NULL);
   ERROR_HELPER(ret,"[ERROR] Failed to join UDP server receiver thread!!!");
 
-  running = 0;
-
-  // Cleanup generale per liberare la memoria utilizzata
-  ret = close(tcp_socket);
-  ERROR_HELPER(ret, "[ERROR] Cannot close TCP socket!!!");
-
-  ret = close(udp_socket);
-  ERROR_HELPER(ret, "[ERROR] Cannot close UDP socket!!!");
-
-  Image_free(surface_texture);
-  Image_free(surface_elevation);
-  World_destroy(&world);
   return 0;     
 }
