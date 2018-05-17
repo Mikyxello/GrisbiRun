@@ -93,6 +93,11 @@ void signalHandler(int signal){
 int TCP_packet (int client_tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture, int len, User* user) {
   PacketHeader* header = (PacketHeader*) buffer;  // Pacchetto per controllo del tipo di richiesta
 
+  if (header->type == ClientReady){
+  	printf("[TCP ID] Client ready packet received\n");
+  	return 1;
+  }
+
   // Se la richiesta dal client a questo server è per l'ID (invia l'id assegnato al client che lo richiede)
   if (header->type == GetId) {
 

@@ -28,11 +28,6 @@
 #define UDP_PORT         8888
 #define BUFFER_SIZE      1000000
 
-typedef struct localWorld{
-    int id_list[WORLD_SIZE];
-    int players_online;
-    Vehicle** vehicles;
-} localWorld;
 
 typedef struct {
     struct sockaddr_in server_addr;
@@ -445,9 +440,16 @@ void* TCP_connections_receiver(void* args) {
         printf("[USER CONNECTED] User %d joined the game...\n", texture_back->id);
 
         // Invia conferma al server
-        while ( (ret = send(tcp_socket, buffer, 4, 0)) < 0) {
+
+        PacketHeader* pack = (PacketHeader*)malloc(sizeof(PacketHeader));
+        pack->type = ClientReady;
+
+        actual_size = Packet_serialize(buffer, pack);
+
+
+        while ( (ret = send(tcp_socket, buffer,actual_size , 0)) < 0) {
           if (errno == EINTR) continue;
-          ERROR_HELPER(ret, "[ERROR] Cannot write to socket sending vehicle texture!!!");
+          ERROR_HELPER(ret, "[ERROR] Cannot write to socket client is becoming ready!!!\n");
         }
 
 				break;
@@ -616,7 +618,7 @@ int main(int argc, char **argv) {
   ret = pthread_join(runner_thread, &retval);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot run world!!!\n");
 
-  cleanMemory();
+  //cleanMemory();
 
   return 0;  
 }

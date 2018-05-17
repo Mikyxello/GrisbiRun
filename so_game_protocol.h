@@ -11,7 +11,8 @@ typedef enum {
   WorldUpdate=0x6,
   VehicleUpdate=0x7,
   UserConnected=0x8,
-  UserDisconnected=0x9
+  UserDisconnected=0x9,
+  ClientReady=0x10
 } Type;
 
 typedef struct {

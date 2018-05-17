@@ -49,6 +49,13 @@ int Packet_serialize(char* dest, const PacketHeader* h){
       dest_end+=sizeof(VehicleUpdatePacket);
       break;
     }
+    case ClientReady:
+    {
+      memcpy(dest, h, sizeof(PacketHeader));
+      dest_end+=sizeof(PacketHeader);
+      break;
+
+    }
   }
 
   PacketHeader* dest_header=(PacketHeader*)dest;
@@ -102,6 +109,10 @@ PacketHeader* Packet_deserialize(const char* buffer, int size){
       VehicleUpdatePacket* vehicle_packet=(VehicleUpdatePacket*) malloc(sizeof(VehicleUpdatePacket));
       memcpy(vehicle_packet, buffer, sizeof(VehicleUpdatePacket));
       return(PacketHeader*) vehicle_packet;
+    }
+    case ClientReady:
+    {
+      return (PacketHeader*)buffer;
     }
   }
   return 0;
