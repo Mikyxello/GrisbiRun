@@ -23,7 +23,7 @@
 #define TCP_PORT        25252         // Porta per la connessione TCP
 #define UDP_PORT        8888          // Porta per la connessione UDP
 #define SERVER_ADDRESS  "127.0.0.1"   // Indirizzo del server (localhost)
-#define TIME_TO_SLEEP   10000         // Imposta timeout di aggiornamento
+#define TIME_TO_SLEEP   100000         // Imposta timeout di aggiornamento
 
 // Struttura per args dei threads in TCP
 typedef struct {
@@ -42,6 +42,24 @@ typedef struct {
 // Definizione Socket e variabili 'globali'
 World world;
 UserHead* users;
+int running;
+
+// Funzione per la gestione dei segnali
+void signalHandler(int signal){
+  switch (signal) {
+	case SIGHUP:
+	  printf("[CLOSING] Server is closing...\n");	
+	  running = 0;
+	  exit(1);
+	case SIGINT:
+	  running = 0;
+	  printf("[CLOSING] Server is closing...\n");
+	  exit(1);
+	default:
+	  printf("[ERROR] Uncaught signal: %d...\n", signal);
+	  return;
+  }
+}
 
 /* Gestione pacchetti TCP ricevuti */
 int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture, int len, User* user) {
@@ -305,7 +323,7 @@ void* TCP_client_handler (void* args){
 
   // Ricezione del pacchetto
   int packet_length = BUFFER_SIZE;
-  while(1) {
+  while(running) {
     while( (ret = recv(tcp_client_desc, buffer_recv + msg_length, packet_length - msg_length, 0)) < 0){
     	if (ret==-1 && errno == EINTR) continue;
     	ERROR_HELPER(ret, "[ERROR] Failed to receive packet!!!");
@@ -454,7 +472,7 @@ void* UDP_sender_handler(void* args) {
   int udp_socket = udp_args->udp_socket;
 
   printf("[UDP SENDER] Ready to send updates...\n");
-  while(1) {
+  while(running) {
     int n_users = users->size;
 
     // Controllo che ci siano utenti connessi
@@ -509,13 +527,25 @@ void* UDP_sender_handler(void* args) {
 
 /* Main */
 int main(int argc, char **argv) {
-  int ret;
-  int tcp_socket, udp_socket;
-
   if (argc<3) {
     printf("usage: %s <elevation_image> <texture_image>\n", argv[1]);
     exit(-1);
   }
+
+  int ret;
+  int tcp_socket, udp_socket;
+
+  // Inizializzazione del signal handler
+  struct sigaction signal_action;
+  signal_action.sa_handler = signalHandler;
+  signal_action.sa_flags = SA_RESTART;
+
+  sigfillset(&signal_action.sa_mask);
+  ret = sigaction(SIGHUP, &signal_action, NULL);
+  ERROR_HELPER(ret,"[ERROR] Cannot handle SIGHUP!!!");
+  ret = sigaction(SIGINT, &signal_action, NULL);
+  ERROR_HELPER(ret,"[ERROR] Cannot handle SIGINT!!!");
+
   char* elevation_filename=argv[1];
   char* texture_filename=argv[2];
   char* vehicle_texture_filename="./images/arrow-right.ppm";
@@ -592,7 +622,6 @@ int main(int argc, char **argv) {
   // Inizializzazione del mondo
   World_init(&world, surface_elevation, surface_texture,  0.5, 0.5, 0.5);
 
-
   /* ------------------- */
   /* Gestione dei thread */
   /* ------------------- */
@@ -607,6 +636,8 @@ int main(int argc, char **argv) {
   udp_args_t udp_args;
   udp_args.udp_socket = udp_socket;
 
+  running = 1;
+
   // Create dei thread 
   ret = pthread_create(&TCP_connection, NULL, TCP_handler, &tcp_args);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Failed to create TCP connection thread!!!");
@@ -618,16 +649,24 @@ int main(int argc, char **argv) {
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Failed to create UDP receiver thread!!!");
 
   // Join dei thread 
-  ret=pthread_join(TCP_connection,NULL);
+  ret = pthread_join(TCP_connection,NULL);
   ERROR_HELPER(ret,"[ERROR] Failed to join TCP server connection thread!!!");
 
-  ret=pthread_join(UDP_sender_thread,NULL);
+  ret = pthread_join(UDP_sender_thread,NULL);
   ERROR_HELPER(ret,"[ERROR] Failed to join UDP server sender thread!!!");
 
-  ret=pthread_join(UDP_receiver_thread,NULL);
+  ret = pthread_join(UDP_receiver_thread,NULL);
   ERROR_HELPER(ret,"[ERROR] Failed to join UDP server receiver thread!!!");
 
+  running = 0;
+
   // Cleanup generale per liberare la memoria utilizzata
+  ret = close(tcp_socket);
+  ERROR_HELPER(ret, "[ERROR] Cannot close TCP socket!!!");
+
+  ret = close(udp_socket);
+  ERROR_HELPER(ret, "[ERROR] Cannot close UDP socket!!!");
+
   Image_free(surface_texture);
   Image_free(surface_elevation);
   World_destroy(&world);

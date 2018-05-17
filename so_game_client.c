@@ -21,14 +21,12 @@
 #include "user_list.h"
 #include "semaphore.h"
 
-#define TIME_TO_SLEEP    10000
+#define TIME_TO_SLEEP    100000
 #define WORLD_SIZE       10
 #define SERVER_ADDRESS   "127.0.0.1"
 #define TCP_PORT         25252
 #define UDP_PORT         8888
 #define BUFFER_SIZE      1000000
-
-char* server_address = "127.0.0.1";
 
 typedef struct localWorld{
     int id_list[WORLD_SIZE];
@@ -57,6 +55,25 @@ int window;
 WorldViewer viewer;
 World world;
 Vehicle* vehicle;
+char* server_address = SERVER_ADDRESS;
+int running;
+
+// Funzione per la gestione dei segnali
+void signalHandler(int signal){
+  switch (signal) {
+  case SIGHUP:
+    printf("[CLOSING] The game is closing...\n"); 
+    running = 0;
+    exit(1);
+  case SIGINT:
+    running = 0;
+    printf("[CLOSING] The game is closing...\n");
+    exit(1);
+  default:
+    printf("[ERROR] Uncaught signal: %d...\n", signal);
+    return;
+  }
+}
 
 /* Invia ogni tot millisecondi l'aggiornamento del proprio veicolo al server in UDP -- TODO: Temporizzare l'invio di messaggi */
 void* UDP_Sender(void* args){
@@ -73,7 +90,7 @@ void* UDP_Sender(void* args){
   struct sockaddr_in server_addr = udp_args->server_addr;
   int sockaddr_len = sizeof(struct sockaddr_in);
 
-  while(1) {
+  while(running) {
     // Preparazione aggiornamento da inviare al server
     VehicleUpdatePacket* vehicle_packet = (VehicleUpdatePacket*) malloc(sizeof(VehicleUpdatePacket));
 
@@ -150,8 +167,6 @@ void* UDP_Receiver(void* args){
 
       World_update(&world);
     }
-
-    
   }
 
   printf("[UDP RECEIVER] Closed receiver...\n");
@@ -365,62 +380,62 @@ void* TCP_connections_receiver(void* args) {
 
 	int tcp_socket = tcp_args->tcp_socket;
 
-	while(1) {
+	while(running) {
 		char buffer[BUFFER_SIZE];
 		int actual_size = 0;
 		int buffer_size = 0;
     int ret=0;
 
 		while(1) {
-	  		while ( (buffer_size += recv(tcp_socket, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
-	  			if (errno == EINTR) continue;
-	  			ERROR_HELPER(-1, "[ERROR] Cannot read from socket on connections controller!!!");
-	  		}
+  		while ( (buffer_size += recv(tcp_socket, buffer + buffer_size, BUFFER_SIZE - buffer_size, 0)) < 0 ) {
+  			if (errno == EINTR) continue;
+  			ERROR_HELPER(-1, "[ERROR] Cannot read from socket on connections controller!!!");
+  		}
 
-	  		actual_size = ((PacketHeader*) buffer)->size;
+  		actual_size = ((PacketHeader*) buffer)->size;
 
-        if (buffer_size < actual_size) continue;
+      if (buffer_size < actual_size) continue;
 
-        PacketHeader* head = (PacketHeader*) Packet_deserialize(buffer, actual_size);
+      PacketHeader* head = (PacketHeader*) Packet_deserialize(buffer, actual_size);
 
-        // Se si connette un user
-	  		if(head->type == UserConnected) {
-					// Load della texture ricevuta
-					ImagePacket* texture_back = (ImagePacket*) Packet_deserialize(buffer, actual_size);
-					Image* new_texture_user = texture_back->image;
+      // Se si connette un user
+  		if(head->type == UserConnected) {
+				// Load della texture ricevuta
+				ImagePacket* texture_back = (ImagePacket*) Packet_deserialize(buffer, actual_size);
+				Image* new_texture_user = texture_back->image;
 
-			    Vehicle* v = (Vehicle*) malloc(sizeof(Vehicle));
-			    Vehicle_init(v, &world, texture_back->id, new_texture_user);
-			    World_addVehicle(&world, v);
+		    Vehicle* v = (Vehicle*) malloc(sizeof(Vehicle));
+		    Vehicle_init(v, &world, texture_back->id, new_texture_user);
+		    World_addVehicle(&world, v);
 
-          printf("[USER CONNECTED] User %d joined the game...\n", texture_back->id);
+        printf("[USER CONNECTED] User %d joined the game...\n", texture_back->id);
 
-          // Invia conferma al server
-          while ( (ret = send(tcp_socket, buffer, 4, 0)) < 0) {
-            if (errno == EINTR) continue;
-            ERROR_HELPER(ret, "[ERROR] Cannot write to socket sending vehicle texture!!!");
-          }
-
-					break;
-  			}
-
-        // Se si disconnette un user
-  			else if(head->type == UserDisconnected) {
-  				IdPacket* id_disconnected = (IdPacket*) Packet_deserialize(buffer, buffer_size);
-
-  				Vehicle* vehicle_to_delete = World_getVehicle(&world, id_disconnected->id);
-  				World_detachVehicle(&world, vehicle_to_delete);
-  				Vehicle_destroy(vehicle_to_delete);
-
-          printf("[USER DISCONNECTED] User %d left the game...\n", id_disconnected->id);
-
-  				break;
-  			}
-
-        else {
-          printf("[TCP CONNECTION CONTROLLER] Received unknown packet from server: %d...\n", head->type);
-          continue;
+        // Invia conferma al server
+        while ( (ret = send(tcp_socket, buffer, 4, 0)) < 0) {
+          if (errno == EINTR) continue;
+          ERROR_HELPER(ret, "[ERROR] Cannot write to socket sending vehicle texture!!!");
         }
+
+				break;
+			}
+
+      // Se si disconnette un user
+			else if(head->type == UserDisconnected) {
+				IdPacket* id_disconnected = (IdPacket*) Packet_deserialize(buffer, buffer_size);
+
+				Vehicle* vehicle_to_delete = World_getVehicle(&world, id_disconnected->id);
+				World_detachVehicle(&world, vehicle_to_delete);
+				Vehicle_destroy(vehicle_to_delete);
+
+        printf("[USER DISCONNECTED] User %d left the game...\n", id_disconnected->id);
+
+				break;
+			}
+
+      else {
+        printf("[TCP CONNECTION CONTROLLER] Received unknown packet from server: %d...\n", head->type);
+        continue;
+      }
 		}
 	}
 
@@ -442,10 +457,27 @@ void serverHandshake (int tcp_socket, int* my_id, Image** my_texture, Image** ma
 
 /* MAIN */
 int main(int argc, char **argv) {
+  running = 0;
+
   if (argc<3) {
     printf("usage: %s <server_address> <player texture>\n", argv[1]);
     exit(-1);
   }
+
+  int ret;
+  int udp_socket;
+  int tcp_socket;
+
+  // Inizializzazione del signal handler
+  struct sigaction signal_action;
+  signal_action.sa_handler = signalHandler;
+  signal_action.sa_flags = SA_RESTART;
+
+  sigfillset(&signal_action.sa_mask);
+  ret = sigaction(SIGHUP, &signal_action, NULL);
+  ERROR_HELPER(ret,"[ERROR] Cannot handle SIGHUP!!!");
+  ret = sigaction(SIGINT, &signal_action, NULL);
+  ERROR_HELPER(ret,"[ERROR] Cannot handle SIGINT!!!");
 
   //printf("loading texture image from %s ... ", argv[2]);
   Image* my_texture = Image_load(argv[2]);
@@ -469,9 +501,6 @@ int main(int argc, char **argv) {
   Image* map_elevation;
   Image* map_texture;
   Image* my_texture_from_server;
-  int ret;
-  int udp_socket;
-  int tcp_socket;
 
   // Apertura connessione TCP
   struct sockaddr_in server_addr = {0};
@@ -495,6 +524,8 @@ int main(int argc, char **argv) {
   udp_server.sin_addr.s_addr = inet_addr(server_address);
   udp_server.sin_family      = AF_INET;
   udp_server.sin_port        = htons(UDP_PORT);
+
+  running = 1;
 
   // Scambia messaggi TCP
   serverHandshake(tcp_socket, &my_id, &my_texture, &map_elevation, &map_texture, &my_texture_from_server);
@@ -563,9 +594,18 @@ int main(int argc, char **argv) {
   ret = pthread_join(runner_thread, &retval);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot run world!!!\n");
 
+  running = 0;
+
   // cleanup
+  ret = close(tcp_socket);
+  ERROR_HELPER(ret, "[ERROR] Cannot close TCP socket!!!");
+
+  ret = close(udp_socket);
+  ERROR_HELPER(ret, "[ERROR] Cannot close UDP socket!!!");
+
   World_destroy(&world);
-  return 0;             
-  
-        
+  Image_free(map_elevation);
+  Image_free(map_texture);
+  Image_free(my_texture_from_server);
+  return 0;  
 }
