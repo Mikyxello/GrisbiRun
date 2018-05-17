@@ -21,7 +21,7 @@
 #include "user_list.h"
 #include "semaphore.h"
 
-#define TIME_TO_SLEEP    100000
+#define TIME_TO_SLEEP    10000
 #define WORLD_SIZE       10
 #define SERVER_ADDRESS   "127.0.0.1"
 #define TCP_PORT         25252
@@ -37,13 +37,11 @@ typedef struct localWorld{
 typedef struct {
     struct sockaddr_in server_addr;
     int id;
-    int udp_socket;
 } udp_args_t;
 
 typedef struct {
     struct sockaddr_in server_addr;
     int id;
-    int tcp_socket;
 } tcp_args_t;
 
 typedef struct {
@@ -55,19 +53,62 @@ int window;
 WorldViewer viewer;
 World world;
 Vehicle* vehicle;
-char* server_address = SERVER_ADDRESS;
-int running;
 
-// Funzione per la gestione dei segnali
+char* server_address = SERVER_ADDRESS;
+
+int running;
+int udp_socket, tcp_socket;
+pthread_t TCP_connection, UDP_sender, UDP_receiver, runner_thread;
+
+Image* map_elevation;
+Image* map_texture;
+Image* my_texture_from_server;
+
+/* Funzione per il cleanup generico della memoria */
+void cleanMemory(void) {
+  int ret;
+
+  running = 0;
+
+  /*
+  ret = pthread_kill(TCP_connection, SIGTERM);
+  ERROR_HELPER(ret, "[ERROR] Cannot terminate the TCP connection thread!!!");
+
+  ret = pthread_kill(UDP_sender, SIGTERM);
+  ERROR_HELPER(ret, "[ERROR] Cannot terminate the UDP sender thread!!!");
+
+  ret = pthread_kill(UDP_receiver, SIGTERM);
+  ERROR_HELPER(ret, "[ERROR] Cannot terminate the UDP receiver thread!!!");
+
+  ret = pthread_kill(runner_thread, SIGTERM);
+  ERROR_HELPER(ret, "[ERROR] Cannot terminate the world runner thread!!!");
+  */
+
+  ret = close(tcp_socket);
+  ERROR_HELPER(ret, "[ERROR] Cannot close TCP socket!!!");
+
+  ret = close(udp_socket);
+  ERROR_HELPER(ret, "[ERROR] Cannot close UDP socket!!!");
+
+  World_destroy(&world);
+  Image_free(map_elevation);
+  Image_free(map_texture);
+  Image_free(my_texture_from_server);
+
+  printf("[CLEANUP] Memory cleaned...\n");
+  return;
+}
+
+/* Funzione per la gestione dei segnali */
 void signalHandler(int signal){
   switch (signal) {
   case SIGHUP:
     printf("[CLOSING] The game is closing...\n"); 
-    running = 0;
+    cleanMemory();
     exit(1);
   case SIGINT:
-    running = 0;
     printf("[CLOSING] The game is closing...\n");
+    cleanMemory();
     exit(1);
   default:
     printf("[ERROR] Uncaught signal: %d...\n", signal);
@@ -84,7 +125,6 @@ void* UDP_Sender(void* args){
 
   // Preparazione connessione
   udp_args_t* udp_args = (udp_args_t*) args;
-  int udp_socket = udp_args->udp_socket;
   int id = udp_args->id;
 
   struct sockaddr_in server_addr = udp_args->server_addr;
@@ -138,7 +178,6 @@ void* UDP_Receiver(void* args){
 
   // Preparazione connessione
   udp_args_t* udp_args = (udp_args_t*) args;
-  int udp_socket = udp_args->udp_socket;
 
   struct sockaddr_in server_addr = udp_args->server_addr;
   socklen_t addrlen = sizeof(struct sockaddr_in);
@@ -186,9 +225,8 @@ void* updater_thread(void* args_){
   return 0;
 }
 
-
  /* GetId dell'utente */
-void recv_ID(int* my_id, int tcp_socket) {
+void recv_ID(int* my_id) {
   int ret;
   char buffer[BUFFER_SIZE];
 
@@ -224,7 +262,7 @@ void recv_ID(int* my_id, int tcp_socket) {
 }
 
 /* GetTexture della texture della mappa */
-void recv_Texture(Image** map_texture, int tcp_socket) {
+void recv_Texture(Image** map_texture) {
   int ret;
   char buffer[BUFFER_SIZE];
 
@@ -272,7 +310,7 @@ void recv_Texture(Image** map_texture, int tcp_socket) {
 }
 
 /* GetElevation della texture della mappa */
-void recv_Elevation(Image** map_elevation, int tcp_socket) {
+void recv_Elevation(Image** map_elevation) {
   int ret;
   char buffer[BUFFER_SIZE];
 
@@ -320,7 +358,7 @@ void recv_Elevation(Image** map_elevation, int tcp_socket) {
 }
 
 /* PostTexture della texture del veicolo */
-void send_Texture(Image** my_texture, Image** my_texture_from_server, int tcp_socket) {
+void send_Texture(Image** my_texture, Image** my_texture_from_server) {
   int ret;
   char buffer[BUFFER_SIZE];
 
@@ -375,10 +413,6 @@ void send_Texture(Image** my_texture, Image** my_texture_from_server, int tcp_so
 void* TCP_connections_receiver(void* args) {
 
 	printf("[TCP CONNECTION CONTROLLER] Connection controller running...\n");
-
-	tcp_args_t* tcp_args = (tcp_args_t*) args;
-
-	int tcp_socket = tcp_args->tcp_socket;
 
 	while(running) {
 		char buffer[BUFFER_SIZE];
@@ -444,18 +478,18 @@ void* TCP_connections_receiver(void* args) {
   pthread_exit(0);
 }
 
-
-void serverHandshake (int tcp_socket, int* my_id, Image** my_texture, Image** map_elevation,Image** map_texture, Image** my_texture_from_server){
+/* Riceve l'id e le texture dal server e invia la texture del proprio veicolo */
+void serverHandshake (int* my_id, Image** my_texture, Image** map_elevation,Image** map_texture, Image** my_texture_from_server){
   // Esegue le 4 operazioni per ottenere id, texture e elevation e inviare la propria texture
-  recv_ID(my_id, tcp_socket);
-  recv_Texture(map_texture, tcp_socket);
-  recv_Elevation(map_elevation, tcp_socket);
-  send_Texture(my_texture, my_texture_from_server, tcp_socket);
+  recv_ID(my_id);
+  recv_Texture(map_texture);
+  recv_Elevation(map_elevation);
+  send_Texture(my_texture, my_texture_from_server);
 
   return;
 }
 
-/* MAIN */
+/* Main */
 int main(int argc, char **argv) {
   running = 0;
 
@@ -465,8 +499,6 @@ int main(int argc, char **argv) {
   }
 
   int ret;
-  int udp_socket;
-  int tcp_socket;
 
   // Inizializzazione del signal handler
   struct sigaction signal_action;
@@ -498,9 +530,6 @@ int main(int argc, char **argv) {
 
   // these come from the server
   int my_id;
-  Image* map_elevation;
-  Image* map_texture;
-  Image* my_texture_from_server;
 
   // Apertura connessione TCP
   struct sockaddr_in server_addr = {0};
@@ -527,10 +556,10 @@ int main(int argc, char **argv) {
 
   running = 1;
 
-  // Scambia messaggi TCP
-  serverHandshake(tcp_socket, &my_id, &my_texture, &map_elevation, &map_texture, &my_texture_from_server);
+  // Richiede l'ID, la texture e l'elevation della mappa e invia la propria texture al server che la rimanda indietro
+  serverHandshake(&my_id, &my_texture, &map_elevation, &map_texture, &my_texture_from_server);
 
-  // construct the world
+  // Carica il mondo con le texture e elevation ricevute
   World_init(&world, map_elevation, map_texture, 0.5, 0.5, 0.5);
 
   // Aggiunge il nostro veicolo al mondo locale
@@ -545,17 +574,10 @@ int main(int argc, char **argv) {
   // when the server notifies a new player has joined the game
   // request the texture and add the player to the pool
   /*FILLME*/
-  
-  pthread_t UDP_sender, UDP_receiver, runner_thread;
-  pthread_t TCP_connection;
-
-  tcp_args_t tcp_args;
-  tcp_args.tcp_socket = tcp_socket;
 
   udp_args_t udp_args;
   udp_args.server_addr = udp_server;
   udp_args.id = my_id;
-  udp_args.udp_socket = udp_socket;
 
   pthread_attr_t runner_attrs;
   UpdaterArgs runner_args={
@@ -567,7 +589,7 @@ int main(int argc, char **argv) {
   runner_args.run=0;
   void* retval;
   
-  ret = pthread_create(&TCP_connection, NULL, TCP_connections_receiver, &tcp_args);
+  ret = pthread_create(&TCP_connection, NULL, TCP_connections_receiver, NULL);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Can't create TCP connection receiver thread!!!");
 
   ret = pthread_create(&UDP_sender, NULL, UDP_Sender, &udp_args);
@@ -594,18 +616,7 @@ int main(int argc, char **argv) {
   ret = pthread_join(runner_thread, &retval);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot run world!!!\n");
 
-  running = 0;
+  cleanMemory();
 
-  // cleanup
-  ret = close(tcp_socket);
-  ERROR_HELPER(ret, "[ERROR] Cannot close TCP socket!!!");
-
-  ret = close(udp_socket);
-  ERROR_HELPER(ret, "[ERROR] Cannot close UDP socket!!!");
-
-  World_destroy(&world);
-  Image_free(map_elevation);
-  Image_free(map_texture);
-  Image_free(my_texture_from_server);
   return 0;  
 }

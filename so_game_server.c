@@ -22,38 +22,66 @@
 #define BUFFER_SIZE     1000000       // Dimensione massima dei buffer utilizzati (grande per evitare di mandare messaggi a pezzi)
 #define TCP_PORT        25252         // Porta per la connessione TCP
 #define UDP_PORT        8888          // Porta per la connessione UDP
-#define SERVER_ADDRESS  "127.0.0.1"   // Indirizzo del server (localhost)
-#define TIME_TO_SLEEP   100000         // Imposta timeout di aggiornamento
+#define TIME_TO_SLEEP   10000         // Imposta timeout di aggiornamento
 
 // Struttura per args dei threads in TCP
 typedef struct {
-	int client_desc;
-	struct sockaddr_in client_addr;
-	Image* elevation_texture;
-	Image* surface_elevation;
-  int tcp_socket;
+  int client_desc;
+  struct sockaddr_in client_addr;
+  Image* elevation_texture;
+  Image* surface_elevation;
 } tcp_args_t;
-
-// Struttura per args dei threads in UDP
-typedef struct {
-  int udp_socket;
-} udp_args_t;
 
 // Definizione Socket e variabili 'globali'
 World world;
 UserHead* users;
 int running;
+int tcp_socket, udp_socket;
+pthread_t TCP_connection, UDP_sender_thread, UDP_receiver_thread;
+Image* surface_elevation;
+Image* surface_texture;
 
-// Funzione per la gestione dei segnali
+/* Funzione per il cleanup generico della memoria */
+void cleanMemory(void) {
+  int ret;
+
+  running = 0;
+
+  /*
+  ret = pthread_kill(TCP_connection, SIGTERM);
+  ERROR_HELPER(ret, "[ERROR] Cannot terminate the TCP connection thread!!!");
+
+  ret = pthread_kill(UDP_sender_thread, SIGTERM);
+  ERROR_HELPER(ret, "[ERROR] Cannot terminate the UDP sender thread!!!");
+
+  ret = pthread_kill(UDP_receiver_thread, SIGTERM);
+  ERROR_HELPER(ret, "[ERROR] Cannot terminate the UDP receiver thread!!!");
+  */
+
+  ret = close(tcp_socket);
+  ERROR_HELPER(ret, "[ERROR] Cannot close TCP socket!!!");
+
+  ret = close(udp_socket);
+  ERROR_HELPER(ret, "[ERROR] Cannot close UDP socket!!!");
+
+  World_destroy(&world);
+  Image_free(surface_elevation);
+  Image_free(surface_texture);
+
+  printf("[CLEANUP] Memory cleaned...\n");
+  return;
+}
+
+/* Funzione per la gestione dei segnali */
 void signalHandler(int signal){
   switch (signal) {
 	case SIGHUP:
 	  printf("[CLOSING] Server is closing...\n");	
-	  running = 0;
+	  cleanMemory();
 	  exit(1);
 	case SIGINT:
-	  running = 0;
 	  printf("[CLOSING] Server is closing...\n");
+	  cleanMemory();
 	  exit(1);
 	default:
 	  printf("[ERROR] Uncaught signal: %d...\n", signal);
@@ -62,7 +90,7 @@ void signalHandler(int signal){
 }
 
 /* Gestione pacchetti TCP ricevuti */
-int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture, int len, User* user) {
+int TCP_packet (int client_tcp_socket, int id, char* buffer, Image* surface_elevation, Image* elevation_texture, int len, User* user) {
   PacketHeader* header = (PacketHeader*) buffer;  // Pacchetto per controllo del tipo di richiesta
 
   // Se la richiesta dal client a questo server è per l'ID (invia l'id assegnato al client che lo richiede)
@@ -86,7 +114,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     int bytes_sent = 0;
     int ret;
     while(bytes_sent < pckt_length){
-      ret = send(tcp_socket, buffer_send + bytes_sent, pckt_length - bytes_sent,0);
+      ret = send(client_tcp_socket, buffer_send + bytes_sent, pckt_length - bytes_sent,0);
       if (ret==-1 && errno==EINTR) continue;
       ERROR_HELPER(ret, "[ERROR] Error assigning ID!!!");
       if (ret==0) break;
@@ -124,7 +152,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     int bytes_sent = 0;
     int ret;
     while(bytes_sent < pckt_length){
-      ret = send(tcp_socket, buffer_send + bytes_sent, pckt_length - bytes_sent,0);
+      ret = send(client_tcp_socket, buffer_send + bytes_sent, pckt_length - bytes_sent,0);
       if (ret==-1 && errno==EINTR) continue;
       ERROR_HELPER(ret, "[ERROR] Error requesting texture!!!");
       if (ret==0) break;
@@ -162,7 +190,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     int bytes_sent = 0;
     int ret;
     while(bytes_sent < pckt_length){
-      ret = send(tcp_socket, buffer_send + bytes_sent, pckt_length - bytes_sent,0);
+      ret = send(client_tcp_socket, buffer_send + bytes_sent, pckt_length - bytes_sent,0);
       if (ret==-1 && errno==EINTR) continue;
       ERROR_HELPER(ret, "[ERROR] Error requesting elevation texture!!!");
       if (ret==0) break;
@@ -192,8 +220,6 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     Vehicle_init(new_vehicle, &world, id, received_texture->image);
     World_addVehicle(&world, new_vehicle);
 
-    //user->vehicle = World_getVehicle(&world, id);
-
     // Rimanda la texture al client come conferma
     PacketHeader header_aux;
     header_aux.type = PostTexture;
@@ -206,7 +232,7 @@ int TCP_packet (int tcp_socket, int id, char* buffer, Image* surface_elevation, 
     int buffer_size = Packet_serialize(buffer, &texture_for_client->header);
     
     // Invia la texture
-    while ( (ret = send(tcp_socket, buffer, buffer_size, 0)) < 0) {
+    while ( (ret = send(client_tcp_socket, buffer, buffer_size, 0)) < 0) {
       if (errno == EINTR) continue;
       ERROR_HELPER(ret, "[ERROR] Cannot write to socket!!!");
     }
@@ -306,14 +332,14 @@ void* TCP_client_handler (void* args){
 
   printf("[TCP CLIENT HANDLER] Handling client with client descriptor (%d)...\n", tcp_args->client_desc);
 
-  int tcp_client_desc = tcp_args->client_desc;
+  int client_tcp_socket = tcp_args->client_desc;
   int msg_length = 0;
   int ret;
   char buffer_recv[BUFFER_SIZE];
 
   // Preparazione utente da inserire in lista
   User* user = (User*) malloc(sizeof(User));
-  user->id = tcp_client_desc;
+  user->id = client_tcp_socket;
   user->user_addr_tcp = tcp_args->client_addr;
   user->x = 0;
   user->y = 0;
@@ -324,7 +350,7 @@ void* TCP_client_handler (void* args){
   // Ricezione del pacchetto
   int packet_length = BUFFER_SIZE;
   while(running) {
-    while( (ret = recv(tcp_client_desc, buffer_recv + msg_length, packet_length - msg_length, 0)) < 0){
+    while( (ret = recv(client_tcp_socket, buffer_recv + msg_length, packet_length - msg_length, 0)) < 0){
     	if (ret==-1 && errno == EINTR) continue;
     	ERROR_HELPER(ret, "[ERROR] Failed to receive packet!!!");
     }
@@ -343,7 +369,7 @@ void* TCP_client_handler (void* args){
 
       IdPacket* user_disconnected = (IdPacket*) malloc(sizeof(IdPacket));
       user_disconnected->header = header_aux;
-      user_disconnected->id = tcp_client_desc;
+      user_disconnected->id = client_tcp_socket;
 
       User* user_aux = users->first;
 
@@ -370,7 +396,7 @@ void* TCP_client_handler (void* args){
     msg_length += ret;
 
     // Gestione del pacchetto ricevuto tramite l'handler dei pacchetti
-    ret = TCP_packet(tcp_client_desc, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture, msg_length, user);
+    ret = TCP_packet(client_tcp_socket, tcp_args->client_desc, buffer_recv, tcp_args->surface_elevation, tcp_args->elevation_texture, msg_length, user);
 
     if (ret == 1) {
       msg_length = 0;
@@ -388,8 +414,7 @@ void* TCP_handler(void* args){
   int ret;
   int tcp_client_desc;
 
-  tcp_args_t* tcp_args = (tcp_args_t*) args;	// Cast degli args da void a tcp_args_t
-  int tcp_socket = tcp_args->tcp_socket;
+  tcp_args_t* tcp_args = (tcp_args_t*) args;
 
   printf("[TCP HANDLER] Accepting connection from clients...\n");
 
@@ -420,12 +445,9 @@ void* TCP_handler(void* args){
   pthread_exit(0);
 }
 
-
 /* Handler della connessione UDP con il client in modalità 'receiver' (riceve pacchetti) */
 void* UDP_receiver_handler(void* args) {
   int ret;
-  udp_args_t* udp_args = (udp_args_t*) args;
-  int udp_socket = udp_args->udp_socket;
   char buffer_recv[BUFFER_SIZE];
   
   struct sockaddr_in client_addr = {0};
@@ -466,10 +488,6 @@ void* UDP_receiver_handler(void* args) {
 /* Handler della connessione UDP con il client in modalità 'sender' (invia pacchetti) */
 void* UDP_sender_handler(void* args) {
   char buffer_send[BUFFER_SIZE];
-
-  //int ret;
-  udp_args_t* udp_args = (udp_args_t*) args;
-  int udp_socket = udp_args->udp_socket;
 
   printf("[UDP SENDER] Ready to send updates...\n");
   while(running) {
@@ -527,13 +545,14 @@ void* UDP_sender_handler(void* args) {
 
 /* Main */
 int main(int argc, char **argv) {
+  running = 0;
+
   if (argc<3) {
     printf("usage: %s <elevation_image> <texture_image>\n", argv[1]);
     exit(-1);
   }
 
   int ret;
-  int tcp_socket, udp_socket;
 
   // Inizializzazione del signal handler
   struct sigaction signal_action;
@@ -548,29 +567,19 @@ int main(int argc, char **argv) {
 
   char* elevation_filename=argv[1];
   char* texture_filename=argv[2];
-  char* vehicle_texture_filename="./images/arrow-right.ppm";
   //printf("loading elevation image from %s ... ", elevation_filename);
 
   // load the images
-  Image* surface_elevation = Image_load(elevation_filename);
+  surface_elevation = Image_load(elevation_filename);
   if (surface_elevation) {
     //printf("Done! \n");
   } else {
     //printf("Fail! \n");
   }
 
-
   //printf("loading texture image from %s ... ", texture_filename);
-  Image* surface_texture = Image_load(texture_filename);
+  surface_texture = Image_load(texture_filename);
   if (surface_texture) {
-    //printf("Done! \n");
-  } else {
-    //printf("Fail! \n");
-  }
-
-  //printf("loading vehicle texture (default) from %s ... ", vehicle_texture_filename);
-  Image* vehicle_texture = Image_load(vehicle_texture_filename);
-  if (vehicle_texture) {
     //printf("Done! \n");
   } else {
     //printf("Fail! \n");
@@ -625,16 +634,11 @@ int main(int argc, char **argv) {
   /* ------------------- */
   /* Gestione dei thread */
   /* ------------------- */
-  pthread_t TCP_connection, UDP_sender_thread, UDP_receiver_thread;
 
   // Args per il thread TCP
   tcp_args_t tcp_args;
   tcp_args.elevation_texture = surface_texture;
   tcp_args.surface_elevation = surface_elevation;
-  tcp_args.tcp_socket = tcp_socket;
-
-  udp_args_t udp_args;
-  udp_args.udp_socket = udp_socket;
 
   running = 1;
 
@@ -642,10 +646,10 @@ int main(int argc, char **argv) {
   ret = pthread_create(&TCP_connection, NULL, TCP_handler, &tcp_args);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Failed to create TCP connection thread!!!");
 
-  ret = pthread_create(&UDP_sender_thread, NULL, UDP_sender_handler, &udp_args);
+  ret = pthread_create(&UDP_sender_thread, NULL, UDP_sender_handler, NULL);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Failed to create UDP sender thread!!!");
 
-  ret = pthread_create(&UDP_receiver_thread, NULL, UDP_receiver_handler, &udp_args); 
+  ret = pthread_create(&UDP_receiver_thread, NULL, UDP_receiver_handler, NULL); 
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Failed to create UDP receiver thread!!!");
 
   // Join dei thread 
