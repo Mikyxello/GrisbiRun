@@ -28,12 +28,6 @@
 #define UDP_PORT         8888
 #define BUFFER_SIZE      1000000
 
-typedef struct localWorld{
-    int id_list[WORLD_SIZE];
-    int players_online;
-    Vehicle** vehicles;
-} localWorld;
-
 typedef struct {
     struct sockaddr_in server_addr;
     int id;
@@ -70,19 +64,17 @@ void cleanMemory(void) {
 
   running = 0;
 
-  /*
-  ret = pthread_kill(TCP_connection, SIGTERM);
+  ret = pthread_cancel(TCP_connection);
   ERROR_HELPER(ret, "[ERROR] Cannot terminate the TCP connection thread!!!");
 
-  ret = pthread_kill(UDP_sender, SIGTERM);
+  ret = pthread_cancel(UDP_sender);
   ERROR_HELPER(ret, "[ERROR] Cannot terminate the UDP sender thread!!!");
 
-  ret = pthread_kill(UDP_receiver, SIGTERM);
+  ret = pthread_cancel(UDP_receiver);
   ERROR_HELPER(ret, "[ERROR] Cannot terminate the UDP receiver thread!!!");
 
-  ret = pthread_kill(runner_thread, SIGTERM);
+  ret = pthread_cancel(runner_thread);
   ERROR_HELPER(ret, "[ERROR] Cannot terminate the world runner thread!!!");
-  */
 
   ret = close(tcp_socket);
   ERROR_HELPER(ret, "[ERROR] Cannot close TCP socket!!!");
@@ -110,6 +102,13 @@ void signalHandler(int signal){
     printf("[CLOSING] The game is closing...\n");
     cleanMemory();
     exit(1);
+  case SIGTERM:
+    printf("[CLOSING] The game is closing...\n");
+    cleanMemory();
+    exit(1);
+  case SIGSEGV:
+    printf("[ERROR] Segmentation fault!!!\n");
+    return;
   default:
     printf("[ERROR] Uncaught signal: %d...\n", signal);
     return;
@@ -498,6 +497,14 @@ int main(int argc, char **argv) {
     exit(-1);
   }
 
+printf(" _____        _       _      _  ______              \n");
+printf("|  __ \\      (_)     | |    (_) | ___ \\             \n");
+printf("| |  \\/ _ __  _  ___ | |__   _  | |_/ /_   _  _ __  \n");
+printf("| | __ | '__|| |/ __|| '_ \\ | | |    /| | | || '_ \\ \n");
+printf("| |_\\ \\| |   | |\\__ \\| |_) || | | |\\ \\| |_| || | | |\n");
+printf(" \\____/|_|   |_||___/|_.__/ |_| \\_| \\_|\\__,_||_| |_|\n");
+printf("\n");
+
   int ret;
 
   // Inizializzazione del signal handler
@@ -510,6 +517,10 @@ int main(int argc, char **argv) {
   ERROR_HELPER(ret,"[ERROR] Cannot handle SIGHUP!!!");
   ret = sigaction(SIGINT, &signal_action, NULL);
   ERROR_HELPER(ret,"[ERROR] Cannot handle SIGINT!!!");
+  ret = sigaction(SIGSEGV, &signal_action, NULL);
+  ERROR_HELPER(ret,"[ERROR] Cannot handle SIGSEGV!!!");
+  ret = sigaction(SIGTERM, &signal_action, NULL);
+  ERROR_HELPER(ret,"[ERROR] Cannot handle SIGTERM!!!");
 
   //printf("loading texture image from %s ... ", argv[2]);
   Image* my_texture = Image_load(argv[2]);
@@ -615,8 +626,6 @@ int main(int argc, char **argv) {
 
   ret = pthread_join(runner_thread, &retval);
   PTHREAD_ERROR_HELPER(ret, "[ERROR] Cannot run world!!!\n");
-
-  cleanMemory();
 
   return 0;  
 }
