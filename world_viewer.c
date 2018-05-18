@@ -107,9 +107,11 @@ void Surface_destructor(Surface* s){
 void Vehicle_destructor(Vehicle* v){
   if (v->gl_list>-1)
     glDeleteLists(v->gl_list, 1);
+  pthread_mutex_lock(&v->mutex);
   v->gl_list=-1;
   if (v->gl_texture>-1)
     glDeleteTextures(1, (unsigned int*)&v->gl_texture);
+  pthread_mutex_unlock(&v->mutex);
 }
 
 void drawBox(float l, float w, float h)

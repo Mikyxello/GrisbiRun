@@ -2,6 +2,7 @@
 #include <GL/gl.h>
 #include <math.h>
 #include "world.h"
+#include <pthread.h>
 
 int Vehicle_update(Vehicle* v, float dt){
   float tf=v->translational_force_update;
@@ -78,6 +79,8 @@ void Vehicle_init(Vehicle* v, World* w, int id, Image* texture){
   v->gl_texture = -1;
   v->gl_list = -1;
   v->_destructor=0;
+
+  pthread_mutex_init(&v->mutex, NULL);
 }
 
 void Vehicle_getXYTheta(Vehicle* v,float* x, float* y, float* theta){

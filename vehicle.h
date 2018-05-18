@@ -2,7 +2,7 @@
 #include "surface.h"
 #include "image.h"
 #include "linked_list.h"
-
+#include <pthread.h>
 
 struct World;
 struct Vehicle;
@@ -34,6 +34,8 @@ typedef struct Vehicle {
   int gl_texture;
   int gl_list;
   VehicleDtor _destructor;
+
+  pthread_mutex_t mutex;
 } Vehicle;
 
 void Vehicle_init(Vehicle* v, struct World* w, int id, Image* texture);

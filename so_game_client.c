@@ -120,9 +120,6 @@ void signalHandler(int signal){
     printf("[CLOSING] The game is closing...\n");
     cleanMemory();
     exit(1);
-  case SIGSEGV:
-    printf("[ERROR] Segmentation fault!!!\n");
-    return;
   default:
     printf("[ERROR] Uncaught signal: %d...\n", signal);
     return;
@@ -216,8 +213,6 @@ void* UDP_Receiver(void* args){
       client_vehicle->x = client->x;
       client_vehicle->y = client->y;
       client_vehicle->theta = client->theta;
-
-      World_update(&world);
     }
   }
 
@@ -232,7 +227,6 @@ void* UDP_Receiver(void* args){
 void* updater_thread(void* args_){
   UpdaterArgs* args=(UpdaterArgs*)args_;
   while(args->run){
-    
     usleep(TIME_TO_SLEEP);
   }
   return 0;
@@ -458,12 +452,10 @@ void* TCP_connections_receiver(void* args) {
         printf("[USER CONNECTED] User %d joined the game...\n", texture_back->id);
 
         // Invia conferma al server
-
         PacketHeader* pack = (PacketHeader*)malloc(sizeof(PacketHeader));
         pack->type = ClientReady;
 
         actual_size = Packet_serialize(buffer, pack);
-
 
         while ( (ret = send(tcp_socket, buffer,actual_size , 0)) < 0) {
           if (errno == EINTR) continue;
@@ -478,8 +470,10 @@ void* TCP_connections_receiver(void* args) {
 				IdPacket* id_disconnected = (IdPacket*) Packet_deserialize(buffer, buffer_size);
 
 				Vehicle* vehicle_to_delete = World_getVehicle(&world, id_disconnected->id);
-				World_detachVehicle(&world, vehicle_to_delete);
-				Vehicle_destroy(vehicle_to_delete);
+        if(vehicle_to_delete) {
+  				World_detachVehicle(&world, vehicle_to_delete);
+  				Vehicle_destroy(vehicle_to_delete);
+        }
 
         printf("[USER DISCONNECTED] User %d left the game...\n", id_disconnected->id);
 
@@ -518,13 +512,13 @@ int main(int argc, char **argv) {
     exit(-1);
   }
 
-printf(" _____        _       _      _  ______              \n");
-printf("|  __ \\      (_)     | |    (_) | ___ \\             \n");
-printf("| |  \\/ _ __  _  ___ | |__   _  | |_/ /_   _  _ __  \n");
-printf("| | __ | '__|| |/ __|| '_ \\ | | |    /| | | || '_ \\ \n");
-printf("| |_\\ \\| |   | |\\__ \\| |_) || | | |\\ \\| |_| || | | |\n");
-printf(" \\____/|_|   |_||___/|_.__/ |_| \\_| \\_|\\__,_||_| |_|\n");
-printf("\n");
+  printf(" _____        _       _      _  ______              \n");
+  printf("|  __ \\      (_)     | |    (_) | ___ \\             \n");
+  printf("| |  \\/ _ __  _  ___ | |__   _  | |_/ /_   _  _ __  \n");
+  printf("| | __ | '__|| |/ __|| '_ \\ | | |    /| | | || '_ \\ \n");
+  printf("| |_\\ \\| |   | |\\__ \\| |_) || | | |\\ \\| |_| || | | |\n");
+  printf(" \\____/|_|   |_||___/|_.__/ |_| \\_| \\_|\\__,_||_| |_|\n");
+  printf("\n");
 
   int ret;
 
@@ -538,8 +532,6 @@ printf("\n");
   ERROR_HELPER(ret,"[ERROR] Cannot handle SIGHUP!!!");
   ret = sigaction(SIGINT, &signal_action, NULL);
   ERROR_HELPER(ret,"[ERROR] Cannot handle SIGINT!!!");
-  ret = sigaction(SIGSEGV, &signal_action, NULL);
-  ERROR_HELPER(ret,"[ERROR] Cannot handle SIGSEGV!!!");
   ret = sigaction(SIGTERM, &signal_action, NULL);
   ERROR_HELPER(ret,"[ERROR] Cannot handle SIGTERM!!!");
 
