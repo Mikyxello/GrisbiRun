@@ -95,15 +95,15 @@ void cleanMemory(void) {
 void signalHandler(int signal){
   switch (signal) {
   case SIGHUP:
-    printf("\n[CLOSING] The game is closing...\n"); 
+    printf("[CLOSING] The game is closing...\n"); 
     cleanMemory();
     exit(1);
   case SIGINT:
-    printf("\n[CLOSING] The game is closing...\n");
+    printf("[CLOSING] The game is closing...\n");
     cleanMemory();
     exit(1);
   case SIGTERM:
-    printf("\n[CLOSING] The game is closing...\n");
+    printf("[CLOSING] The game is closing...\n");
     cleanMemory();
     exit(1);
   case SIGSEGV:
@@ -455,8 +455,8 @@ void* TCP_connections_receiver(void* args) {
           if (errno == EINTR) continue;
           ERROR_HELPER(ret, "[ERROR] Cannot write to socket client is becoming ready!!!\n");
         }
-        free(pack);
-		break;
+
+				break;
 			}
 
       // Se si disconnette un user
