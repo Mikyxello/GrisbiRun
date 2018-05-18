@@ -21,7 +21,7 @@
 #include "user_list.h"
 #include "semaphore.h"
 
-#define TIME_TO_SLEEP    10000
+#define TIME_TO_SLEEP    40000
 #define WORLD_SIZE       10
 #define SERVER_ADDRESS   "127.0.0.1"
 #define TCP_PORT         25252
@@ -54,6 +54,7 @@ int running;
 int udp_socket, tcp_socket;
 pthread_t TCP_connection, UDP_sender, UDP_receiver, runner_thread;
 
+int my_id;
 Image* map_elevation;
 Image* map_texture;
 Image* my_texture_from_server;
@@ -231,7 +232,7 @@ void* UDP_Receiver(void* args){
 void* updater_thread(void* args_){
   UpdaterArgs* args=(UpdaterArgs*)args_;
   while(args->run){
-    World_update(args->world);
+    
     usleep(TIME_TO_SLEEP);
   }
   return 0;
@@ -558,9 +559,6 @@ printf("\n");
   //   -send your texture to the server (so that all can see you)
   //   -get an elevation map
   //   -get the texture of the surface
-
-  // these come from the server
-  int my_id;
 
   // Apertura connessione TCP
   struct sockaddr_in server_addr = {0};
