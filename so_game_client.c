@@ -88,6 +88,19 @@ void cleanMemory(void) {
   Image_free(my_texture_from_server);
 
   printf("[CLEANUP] Memory cleaned...\n");
+
+
+   printf("   _____      _     _     _ ____             \n");
+   printf("  / ____|    (_)   | |   (_)  _ \\            \n");
+   printf(" | |  __ _ __ _ ___| |__  _| |_) |_   _  ___ \n");
+   printf(" | | |_ | '__| / __| '_ \\| |  _ <| | | |/ _ \\ \n");
+   printf(" | |__| | |  | \\__ \\ |_) | | |_) | |_| |  __/\n");
+   printf("  \\_____|_|  |_|___/_.__/|_|____/ \\__, |\\___| \n");
+   printf("                                   __/ |     \n");
+   printf("                                  |___/      \n");
+   printf("\n");
+
+
   return;
 }
 
