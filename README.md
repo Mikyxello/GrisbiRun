@@ -64,7 +64,7 @@ Use `Ctrl-C` for stopping, as the server.
 * **Michele Anselmi** - [Mikyxello](https://github.com/Mikyxello)
 * **Andrea Misuraca** - [andreamisu](https://github.com/andreamisu)
 
-See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.
+See also the list of [contributors](https://github.com/Mikyxello/GrisbiRun/contributors) who participated in this project.
 
 ## License
 
